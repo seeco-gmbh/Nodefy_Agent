@@ -12,42 +12,41 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux amd64 - with systray
+          # Linux amd64
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
-            cgo: 1
-            name: nodefy-agent-linux-amd64
-          # Linux arm64 - without systray (no native runner)
-          - os: ubuntu-latest
+            artifact: nodefy-agent-linux-amd64
+            
+          # Linux arm64 (native ARM runner)
+          - os: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
-            cgo: 0
-            name: nodefy-agent-linux-arm64
-          # Windows amd64 - with systray
+            artifact: nodefy-agent-linux-arm64
+            
+          # Windows amd64
           - os: windows-latest
             goos: windows
             goarch: amd64
-            cgo: 1
-            name: nodefy-agent-windows-amd64.exe
-          # Windows arm64 - without systray (cross-compile)
-          - os: windows-latest
+            artifact: nodefy-agent-windows-amd64.exe
+            
+          # Windows arm64 (native ARM runner)
+          - os: windows-11-arm
             goos: windows
             goarch: arm64
-            cgo: 0
-            name: nodefy-agent-windows-arm64.exe
-          # macOS Intel - without systray (cross-compile on arm64 runner)
-          - os: macos-latest
+            artifact: nodefy-agent-windows-arm64.exe
+            
+          # macOS Intel
+          - os: macos-15-intel
             goos: darwin
             goarch: amd64
-            cgo: 0
-            name: nodefy-agent-darwin-amd64
-          # macOS Apple Silicon - with systray
+            artifact: Nodefy-Agent-macOS-Intel.zip
+            
+          # macOS Apple Silicon
           - os: macos-latest
             goos: darwin
             goarch: arm64
-            cgo: 1
-            name: nodefy-agent-darwin-arm64
+            artifact: Nodefy-Agent-macOS-ARM.zip
 
     runs-on: ${{ matrix.os }}
     
@@ -59,25 +58,80 @@ jobs:
         with:
           go-version: '1.22'
 
+      # Linux: Install systray dependencies
       - name: Install Linux dependencies
-        if: matrix.goos == 'linux' && matrix.cgo == 1
+        if: matrix.goos == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc libgtk-3-dev libayatana-appindicator3-dev
 
-      - name: Build
+      # Linux: Build
+      - name: Build (Linux)
+        if: matrix.goos == 'linux'
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo }}
+          CGO_ENABLED: 1
         run: |
-          go build -ldflags="-s -w" -o ${{ matrix.name }} ./cmd/agent
+          go build -ldflags="-s -w" -o ${{ matrix.artifact }} ./cmd/agent
+
+      # Windows: Build with -H windowsgui to hide console
+      - name: Build (Windows)
+        if: matrix.goos == 'windows'
+        env:
+          CGO_ENABLED: 1
+        run: |
+          go build -ldflags="-s -w -H windowsgui" -o ${{ matrix.artifact }} ./cmd/agent
+
+      # macOS: Build and create .app bundle
+      - name: Build (macOS)
+        if: matrix.goos == 'darwin'
+        env:
+          CGO_ENABLED: 1
+        run: |
+          go build -ldflags="-s -w" -o nodefy-agent ./cmd/agent
+          
+          # Create .app bundle
+          mkdir -p "Nodefy Agent.app/Contents/MacOS"
+          mkdir -p "Nodefy Agent.app/Contents/Resources"
+          mv nodefy-agent "Nodefy Agent.app/Contents/MacOS/Nodefy Agent"
+          
+          # Create Info.plist
+          cat > "Nodefy Agent.app/Contents/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>Nodefy Agent</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.nodefy.agent</string>
+              <key>CFBundleName</key>
+              <string>Nodefy Agent</string>
+              <key>CFBundleDisplayName</key>
+              <string>Nodefy Agent</string>
+              <key>CFBundleVersion</key>
+              <string>1.0.0</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0.0</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>LSMinimumSystemVersion</key>
+              <string>11.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+          
+          # Zip the app bundle
+          zip -r "${{ matrix.artifact }}" "Nodefy Agent.app"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.name }}
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
           retention-days: 7
 
   release:
