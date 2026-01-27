@@ -36,11 +36,11 @@ jobs:
             goarch: arm64
             cgo: 0
             name: nodefy-agent-windows-arm64.exe
-          # macOS Intel - with systray
-          - os: macos-13
+          # macOS Intel - without systray (cross-compile on arm64 runner)
+          - os: macos-latest
             goos: darwin
             goarch: amd64
-            cgo: 1
+            cgo: 0
             name: nodefy-agent-darwin-amd64
           # macOS Apple Silicon - with systray
           - os: macos-latest
