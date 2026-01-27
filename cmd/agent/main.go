@@ -1,3 +1,5 @@
+//go:build windows || darwin || linux
+
 package main
 
 import (
@@ -8,6 +10,8 @@ import (
 	"syscall"
 
 	"nodefy/agent/internal/config"
+	"nodefy/agent/internal/server"
+	"nodefy/agent/internal/tray"
 	"nodefy/agent/internal/watcher"
 	"nodefy/agent/internal/websocket"
 
@@ -19,8 +23,9 @@ var (
 	version = "0.1.0"
 	
 	// Global references for server message handling
-	globalWatcher   *watcher.Watcher
-	globalWsClient  *websocket.Client
+	globalWatcher     *watcher.Watcher
+	globalWsClient    *websocket.Client
+	globalLocalServer *server.LocalServer
 )
 
 func main() {
@@ -45,7 +50,22 @@ func main() {
 	showVersionShort := flag.Bool("v", false, "Show version (shorthand)")
 	
 	initConfig := flag.Bool("init", false, "Create default config file")
+	
+	// Local mode - run as local server for browser connections
+	localMode := flag.Bool("local", false, "Run as local server (for browser connections)")
+	localModeShort := flag.Bool("l", false, "Run as local server (shorthand)")
+	localPort := flag.String("port", "9081", "Local server port")
+	localPortShort := flag.String("p", "", "Local server port (shorthand)")
+	
 	flag.Parse()
+	
+	// Resolve local mode flags
+	if *localModeShort {
+		*localMode = true
+	}
+	if *localPortShort != "" {
+		*localPort = *localPortShort
+	}
 	
 	// Resolve shorthand flags
 	if *configPathShort != "" {
@@ -119,7 +139,67 @@ func main() {
 		cfg.WatchPaths = append(cfg.WatchPaths, watchPaths...)
 	}
 
-	// Validate configuration
+	// Determine mode: local or orchestrator
+	// If no orchestrator URL and no session key, default to local mode
+	if *orchestratorURL == "" && *sessionKey == "" && cfg.OrchestratorURL == "" {
+		*localMode = true
+	}
+
+	if *localMode {
+		runLocalMode(cfg, *localPort)
+	} else {
+		runOrchestratorMode(cfg)
+	}
+}
+
+func runLocalMode(cfg *config.Config, port string) {
+	log.Info().
+		Str("version", version).
+		Str("port", port).
+		Msg("Starting Nodefy Agent in local mode")
+
+	// Create local server
+	localServer := server.NewLocalServer(port, handleLocalMessage)
+	globalLocalServer = localServer
+
+	// Create file watcher
+	fileWatcher, err := watcher.New(
+		cfg.FileTypes,
+		cfg.Recursive,
+		func(event watcher.Event) {
+			handleLocalFileEvent(localServer, event)
+		},
+	)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create file watcher")
+	}
+	globalWatcher = fileWatcher
+
+	// Start local server
+	if err := localServer.Start(); err != nil {
+		log.Fatal().Err(err).Msg("Failed to start local server")
+	}
+
+	// Start file watcher
+	fileWatcher.Start()
+
+	log.Info().Str("url", "ws://localhost:"+port+"/ws").Msg("Local server ready")
+
+	// Cleanup function
+	cleanup := func() {
+		log.Info().Msg("Shutting down...")
+		localServer.Stop()
+		fileWatcher.Stop()
+		log.Info().Msg("Agent stopped")
+	}
+
+	// System tray (blocking - runs on main thread)
+	sysTray := tray.New(localServer, cleanup)
+	sysTray.Run()
+}
+
+func runOrchestratorMode(cfg *config.Config) {
+	// Validate configuration for orchestrator mode
 	if err := cfg.Validate(); err != nil {
 		log.Fatal().Err(err).Msg("Invalid configuration")
 	}
@@ -128,7 +208,7 @@ func main() {
 		Str("version", version).
 		Str("orchestrator", cfg.OrchestratorURL).
 		Strs("paths", cfg.WatchPaths).
-		Msg("Starting Nodefy Agent")
+		Msg("Starting Nodefy Agent in orchestrator mode")
 
 	// Create WebSocket client
 	wsClient := websocket.NewClient(
@@ -233,6 +313,57 @@ func handleServerMessage(msg websocket.Message) {
 		}
 	case websocket.TypeUnwatch:
 		// Remove watch path dynamically
+		log.Info().Str("path", msg.Path).Msg("Removing watch path")
+		if globalWatcher != nil {
+			if err := globalWatcher.Unwatch(msg.Path); err != nil {
+				log.Error().Err(err).Str("path", msg.Path).Msg("Failed to remove watch path")
+			} else {
+				log.Info().Str("path", msg.Path).Msg("Watch path removed successfully")
+			}
+		}
+	}
+}
+
+// Local mode handlers
+
+func handleLocalFileEvent(srv *server.LocalServer, event watcher.Event) {
+	log.Debug().
+		Str("path", event.Path).
+		Str("name", event.Name).
+		Str("op", event.Operation).
+		Msg("Processing file event (local)")
+
+	switch event.Operation {
+	case "create", "modify":
+		if err := srv.SendFileWithContent(event.Path, event.Name, event.Operation); err != nil {
+			log.Error().Err(err).Msg("Failed to send file event")
+		}
+	case "delete", "rename":
+		if err := srv.SendFileChanged(event.Path, event.Name, event.Operation); err != nil {
+			log.Error().Err(err).Msg("Failed to send file event")
+		}
+	}
+}
+
+func handleLocalMessage(msg server.Message) {
+	log.Debug().Str("type", msg.Type).Msg("Received message from browser")
+
+	switch msg.Type {
+	case server.TypeWatch:
+		// Add new watch path
+		log.Info().Str("path", msg.Path).Bool("recursive", msg.Recursive).Msg("Adding watch path")
+		if globalWatcher != nil {
+			if err := globalWatcher.Watch(msg.Path); err != nil {
+				log.Error().Err(err).Str("path", msg.Path).Msg("Failed to add watch path")
+			} else {
+				log.Info().Str("path", msg.Path).Msg("Watch path added successfully")
+				if globalLocalServer != nil {
+					globalLocalServer.SendWatchStarted(msg.Path)
+				}
+			}
+		}
+	case server.TypeUnwatch:
+		// Remove watch path
 		log.Info().Str("path", msg.Path).Msg("Removing watch path")
 		if globalWatcher != nil {
 			if err := globalWatcher.Unwatch(msg.Path); err != nil {

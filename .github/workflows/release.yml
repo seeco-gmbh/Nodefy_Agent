@@ -1,95 +1,90 @@
-name: Release
+name: Build and Release
 
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., v0.1.0)'
-        required: true
-        type: string
-
-permissions:
-  contents: write
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            name: nodefy-agent-linux-amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            name: nodefy-agent-linux-arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            name: nodefy-agent-windows-amd64.exe
+          - os: windows-latest
+            goos: windows
+            goarch: arm64
+            name: nodefy-agent-windows-arm64.exe
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            name: nodefy-agent-darwin-amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            name: nodefy-agent-darwin-arm64
+
+    runs-on: ${{ matrix.os }}
+    
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-      
-      - name: Get version
-        id: version
+
+      - name: Install Linux dependencies
+        if: matrix.goos == 'linux'
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Build binaries
+          sudo apt-get update
+          sudo apt-get install -y gcc libgtk-3-dev libayatana-appindicator3-dev
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
         run: |
-          VERSION=${{ steps.version.outputs.VERSION }}
-          LDFLAGS="-s -w -X main.version=${VERSION}"
-          
-          mkdir -p bin
-          
-          # macOS (Intel)
-          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o bin/nodefy-agent-darwin-amd64 ./cmd/agent
-          
-          # macOS (Apple Silicon)
-          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o bin/nodefy-agent-darwin-arm64 ./cmd/agent
-          
-          # Linux
-          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o bin/nodefy-agent-linux-amd64 ./cmd/agent
-          
-          # Windows
-          GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o bin/nodefy-agent-windows-amd64.exe ./cmd/agent
-          
-          # Create checksums
-          cd bin
-          sha256sum * > checksums.txt
-      
+          go build -ldflags="-s -w" -o ${{ matrix.name }} ./cmd/agent
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: binaries
+          merge-multiple: true
+
+      - name: List binaries
+        run: ls -la binaries/
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.VERSION }}
-          name: Nodefy Agent ${{ steps.version.outputs.VERSION }}
-          draft: false
-          prerelease: false
-          files: |
-            bin/nodefy-agent-darwin-amd64
-            bin/nodefy-agent-darwin-arm64
-            bin/nodefy-agent-linux-amd64
-            bin/nodefy-agent-windows-amd64.exe
-            bin/checksums.txt
-          body: |
-            ## Nodefy Agent ${{ steps.version.outputs.VERSION }}
-            
-            ### Downloads
-            
-            | OS | Architecture | Download |
-            |----|--------------|----------|
-            | macOS | Intel (x64) | [nodefy-agent-darwin-amd64](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/nodefy-agent-darwin-amd64) |
-            | macOS | Apple Silicon (M1/M2) | [nodefy-agent-darwin-arm64](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/nodefy-agent-darwin-arm64) |
-            | Linux | x64 | [nodefy-agent-linux-amd64](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/nodefy-agent-linux-amd64) |
-            | Windows | x64 | [nodefy-agent-windows-amd64.exe](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/nodefy-agent-windows-amd64.exe) |
-            
-            ### Usage
-            
-            ```bash
-            # Download and make executable (macOS/Linux)
-            chmod +x nodefy-agent-*
-            
-            # Run with your session key
-            ./nodefy-agent -o wss://api.nodefy.app/ws/agent -k YOUR_SESSION_KEY
-            ```
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: binaries/*
+          generate_release_notes: true
