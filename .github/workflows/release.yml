@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Build binaries
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          
+          mkdir -p bin
+          
+          # macOS (Intel)
+          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o bin/nodefy-agent-darwin-amd64 ./cmd/agent
+          
+          # macOS (Apple Silicon)
+          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o bin/nodefy-agent-darwin-arm64 ./cmd/agent
+          
+          # Linux
+          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o bin/nodefy-agent-linux-amd64 ./cmd/agent
+          
+          # Windows
+          GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o bin/nodefy-agent-windows-amd64.exe ./cmd/agent
+          
+          # Create checksums
+          cd bin
+          sha256sum * > checksums.txt
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: Nodefy Agent ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          files: |
+            bin/nodefy-agent-darwin-amd64
+            bin/nodefy-agent-darwin-arm64
+            bin/nodefy-agent-linux-amd64
+            bin/nodefy-agent-windows-amd64.exe
+            bin/checksums.txt
+          body: |
+            ## Nodefy Agent ${{ steps.version.outputs.VERSION }}
+            
+            ### Downloads
+            
+            | OS | Architecture | Download |
+            |----|--------------|----------|
+            | macOS | Intel (x64) | [nodefy-agent-darwin-amd64](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/nodefy-agent-darwin-amd64) |
+            | macOS | Apple Silicon (M1/M2) | [nodefy-agent-darwin-arm64](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/nodefy-agent-darwin-arm64) |
+            | Linux | x64 | [nodefy-agent-linux-amd64](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/nodefy-agent-linux-amd64) |
+            | Windows | x64 | [nodefy-agent-windows-amd64.exe](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/nodefy-agent-windows-amd64.exe) |
+            
+            ### Usage
+            
+            ```bash
+            # Download and make executable (macOS/Linux)
+            chmod +x nodefy-agent-*
+            
+            # Run with your session key
+            ./nodefy-agent -o wss://api.nodefy.app/ws/agent -k YOUR_SESSION_KEY
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
