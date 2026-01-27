@@ -9,31 +9,44 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
+          # Linux amd64 - with systray
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
+            cgo: 1
             name: nodefy-agent-linux-amd64
+          # Linux arm64 - without systray (no native runner)
           - os: ubuntu-latest
             goos: linux
             goarch: arm64
+            cgo: 0
             name: nodefy-agent-linux-arm64
+          # Windows amd64 - with systray
           - os: windows-latest
             goos: windows
             goarch: amd64
+            cgo: 1
             name: nodefy-agent-windows-amd64.exe
+          # Windows arm64 - without systray (cross-compile)
           - os: windows-latest
             goos: windows
             goarch: arm64
+            cgo: 0
             name: nodefy-agent-windows-arm64.exe
-          - os: macos-latest
+          # macOS Intel - with systray
+          - os: macos-13
             goos: darwin
             goarch: amd64
+            cgo: 1
             name: nodefy-agent-darwin-amd64
+          # macOS Apple Silicon - with systray
           - os: macos-latest
             goos: darwin
             goarch: arm64
+            cgo: 1
             name: nodefy-agent-darwin-arm64
 
     runs-on: ${{ matrix.os }}
@@ -47,7 +60,7 @@ jobs:
           go-version: '1.22'
 
       - name: Install Linux dependencies
-        if: matrix.goos == 'linux'
+        if: matrix.goos == 'linux' && matrix.cgo == 1
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc libgtk-3-dev libayatana-appindicator3-dev
@@ -56,7 +69,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 1
+          CGO_ENABLED: ${{ matrix.cgo }}
         run: |
           go build -ldflags="-s -w" -o ${{ matrix.name }} ./cmd/agent
 
