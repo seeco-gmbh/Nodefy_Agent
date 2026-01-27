@@ -3,9 +3,12 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
@@ -13,26 +16,33 @@ import (
 
 // Message types (same as websocket client for compatibility)
 const (
-	TypeWatch        = "watch"
-	TypeUnwatch      = "unwatch"
-	TypeFileChanged  = "file_changed"
-	TypeWatchStarted = "watch_started"
-	TypeHeartbeat    = "heartbeat"
-	TypeAck          = "ack"
-	TypeError        = "error"
-	TypeStatus       = "status"
+	TypeWatch          = "watch"
+	TypeUnwatch        = "unwatch"
+	TypeFileChanged    = "file_changed"
+	TypeWatchStarted   = "watch_started"
+	TypeHeartbeat      = "heartbeat"
+	TypeAck            = "ack"
+	TypeError          = "error"
+	TypeStatus         = "status"
+	TypeOpenFileDialog = "open_file_dialog"
+	TypeFileSelected   = "file_selected"
+	TypeDialogCanceled = "dialog_canceled"
 )
 
 // Message represents a WebSocket message
 type Message struct {
-	Type      string `json:"type"`
-	Path      string `json:"path,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Operation string `json:"operation,omitempty"`
-	Content   string `json:"content,omitempty"`
-	Recursive bool   `json:"recursive,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Connected bool   `json:"connected,omitempty"`
+	Type      string   `json:"type"`
+	Path      string   `json:"path,omitempty"`
+	Name      string   `json:"name,omitempty"`
+	Operation string   `json:"operation,omitempty"`
+	Content   string   `json:"content,omitempty"`
+	Recursive bool     `json:"recursive,omitempty"`
+	Error     string   `json:"error,omitempty"`
+	Connected bool     `json:"connected,omitempty"`
+	Size      int64    `json:"size,omitempty"`      // File size in bytes
+	Title     string   `json:"title,omitempty"`     // Dialog title
+	Filters   []string `json:"filters,omitempty"`   // File type filters (e.g., ["*.xlsx", "*.csv"])
+	RequestID string   `json:"request_id,omitempty"` // To match request/response
 }
 
 // MessageHandler is called when a message is received from a client
@@ -89,8 +99,38 @@ func NewLocalServer(port string, handler MessageHandler) *LocalServer {
 	}
 }
 
+// CheckPortAvailable checks if the port is available
+func CheckPortAvailable(port string) error {
+	addr := "127.0.0.1:" + port
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	ln.Close()
+	return nil
+}
+
+// CheckExistingAgent checks if an agent is already running on the port
+func CheckExistingAgent(port string) bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get("http://127.0.0.1:" + port + "/status")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 // Start starts the local WebSocket server
 func (s *LocalServer) Start() error {
+	// Check if port is available
+	if err := CheckPortAvailable(s.port); err != nil {
+		if CheckExistingAgent(s.port) {
+			return fmt.Errorf("another Nodefy Agent is already running on port %s", s.port)
+		}
+		return fmt.Errorf("port %s is already in use: %w", s.port, err)
+	}
+
 	mux := http.NewServeMux()
 
 	// Health/status endpoint
@@ -104,15 +144,24 @@ func (s *LocalServer) Start() error {
 		Handler: s.corsMiddleware(mux),
 	}
 
-	s.running = true
-
-	log.Info().Str("port", s.port).Msg("Starting local WebSocket server")
-
+	// Start server and wait for it to be ready
+	errCh := make(chan error, 1)
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error().Err(err).Msg("Local server error")
+			errCh <- err
 		}
 	}()
+
+	// Give the server a moment to start or fail
+	select {
+	case err := <-errCh:
+		return fmt.Errorf("failed to start server: %w", err)
+	case <-time.After(100 * time.Millisecond):
+		// Server started successfully
+	}
+
+	s.running = true
+	log.Info().Str("port", s.port).Msg("WebSocket server started")
 
 	return nil
 }
@@ -254,11 +303,34 @@ func (s *LocalServer) SendFileChanged(path, name, operation string) error {
 }
 
 // SendFileWithContent broadcasts a file changed event with content
+// Uses retry logic to handle file locking (e.g., Excel saves)
 func (s *LocalServer) SendFileWithContent(path, name, operation string) error {
-	content, err := os.ReadFile(path)
+	var content []byte
+	var err error
+	
+	// Retry up to 5 times with increasing delay (handles file locking from Excel, etc.)
+	maxRetries := 5
+	for i := 0; i < maxRetries; i++ {
+		content, err = os.ReadFile(path)
+		if err == nil {
+			break
+		}
+		
+		// Wait before retry (100ms, 200ms, 300ms, 400ms, 500ms)
+		delay := time.Duration(100*(i+1)) * time.Millisecond
+		log.Debug().
+			Err(err).
+			Str("path", path).
+			Int("attempt", i+1).
+			Dur("delay", delay).
+			Msg("File locked, retrying...")
+		time.Sleep(delay)
+	}
+	
 	if err != nil {
-		log.Error().Err(err).Str("path", path).Msg("Failed to read file for broadcast")
-		return s.SendFileChanged(path, name, operation)
+		log.Error().Err(err).Str("path", path).Int("retries", maxRetries).Msg("Failed to read file after retries")
+		// Don't send event without content - it would be ignored by frontend anyway
+		return err
 	}
 
 	s.Broadcast(Message{
@@ -276,6 +348,33 @@ func (s *LocalServer) SendWatchStarted(path string) error {
 	s.Broadcast(Message{
 		Type: TypeWatchStarted,
 		Path: path,
+	})
+	return nil
+}
+
+// SendFileSelected broadcasts a file selected event with content
+func (s *LocalServer) SendFileSelected(path, name string, size int64, requestID string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		log.Error().Err(err).Str("path", path).Msg("Failed to read selected file")
+		// Send without content
+		s.Broadcast(Message{
+			Type:      TypeFileSelected,
+			Path:      path,
+			Name:      name,
+			Size:      size,
+			RequestID: requestID,
+		})
+		return err
+	}
+
+	s.Broadcast(Message{
+		Type:      TypeFileSelected,
+		Path:      path,
+		Name:      name,
+		Size:      size,
+		Content:   base64.StdEncoding.EncodeToString(content),
+		RequestID: requestID,
 	})
 	return nil
 }

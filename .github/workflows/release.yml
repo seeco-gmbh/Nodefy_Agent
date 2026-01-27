@@ -18,7 +18,7 @@ jobs:
             goarch: amd64
             artifact: nodefy-agent-linux-amd64
             
-          # Linux arm64 (native ARM runner)
+          # Linux arm64
           - os: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
@@ -30,7 +30,7 @@ jobs:
             goarch: amd64
             artifact: nodefy-agent-windows-amd64.exe
             
-          # Windows arm64 (native ARM runner)
+          # Windows arm64
           - os: windows-11-arm
             goos: windows
             goarch: arm64
@@ -40,13 +40,15 @@ jobs:
           - os: macos-15-intel
             goos: darwin
             goarch: amd64
-            artifact: Nodefy-Agent-macOS-Intel.zip
+            artifact: nodefy-agent-darwin-amd64
+            bundle: Nodefy-Agent-macOS-Intel.zip
             
           # macOS Apple Silicon
           - os: macos-latest
             goos: darwin
             goarch: arm64
-            artifact: Nodefy-Agent-macOS-ARM.zip
+            artifact: nodefy-agent-darwin-arm64
+            bundle: Nodefy-Agent-macOS.zip
 
     runs-on: ${{ matrix.os }}
     
@@ -73,66 +75,79 @@ jobs:
         run: |
           go build -ldflags="-s -w" -o ${{ matrix.artifact }} ./cmd/agent
 
-      # Windows: Build with -H windowsgui to hide console
+      # Windows: Build
       - name: Build (Windows)
         if: matrix.goos == 'windows'
         env:
           CGO_ENABLED: 1
         run: |
-          go build -ldflags="-s -w -H windowsgui" -o ${{ matrix.artifact }} ./cmd/agent
+          go build -ldflags="-s -w" -o ${{ matrix.artifact }} ./cmd/agent
 
-      # macOS: Build and create .app bundle
+      # macOS: Build binary and create signed .app bundle
       - name: Build (macOS)
         if: matrix.goos == 'darwin'
         env:
           CGO_ENABLED: 1
+          GOARCH: ${{ matrix.goarch }}
         run: |
-          go build -ldflags="-s -w" -o nodefy-agent ./cmd/agent
+          # Build the binary
+          go build -ldflags="-s -w" -o ${{ matrix.artifact }} ./cmd/agent
           
           # Create .app bundle
           mkdir -p "Nodefy Agent.app/Contents/MacOS"
           mkdir -p "Nodefy Agent.app/Contents/Resources"
-          mv nodefy-agent "Nodefy Agent.app/Contents/MacOS/Nodefy Agent"
+          cp ${{ matrix.artifact }} "Nodefy Agent.app/Contents/MacOS/Nodefy Agent"
           
           # Create Info.plist
-          cat > "Nodefy Agent.app/Contents/Info.plist" << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>Nodefy Agent</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.nodefy.agent</string>
-              <key>CFBundleName</key>
-              <string>Nodefy Agent</string>
-              <key>CFBundleDisplayName</key>
-              <string>Nodefy Agent</string>
-              <key>CFBundleVersion</key>
-              <string>1.0.0</string>
-              <key>CFBundleShortVersionString</key>
-              <string>1.0.0</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>LSUIElement</key>
-              <true/>
-              <key>LSMinimumSystemVersion</key>
-              <string>11.0</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-          </dict>
-          </plist>
-          EOF
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+            '<plist version="1.0">' \
+            '<dict>' \
+            '    <key>CFBundleExecutable</key>' \
+            '    <string>Nodefy Agent</string>' \
+            '    <key>CFBundleIdentifier</key>' \
+            '    <string>com.nodefy.agent</string>' \
+            '    <key>CFBundleName</key>' \
+            '    <string>Nodefy Agent</string>' \
+            '    <key>CFBundleDisplayName</key>' \
+            '    <string>Nodefy Agent</string>' \
+            '    <key>CFBundleVersion</key>' \
+            '    <string>0.2.0</string>' \
+            '    <key>CFBundleShortVersionString</key>' \
+            '    <string>0.2.0</string>' \
+            '    <key>CFBundlePackageType</key>' \
+            '    <string>APPL</string>' \
+            '    <key>LSUIElement</key>' \
+            '    <true/>' \
+            '    <key>LSMinimumSystemVersion</key>' \
+            '    <string>11.0</string>' \
+            '    <key>NSHighResolutionCapable</key>' \
+            '    <true/>' \
+            '</dict>' \
+            '</plist>' > "Nodefy Agent.app/Contents/Info.plist"
+          
+          # Ad-hoc code signing
+          codesign --force --deep --sign - "Nodefy Agent.app"
           
           # Zip the app bundle
-          zip -r "${{ matrix.artifact }}" "Nodefy Agent.app"
+          zip -r "${{ matrix.bundle }}" "Nodefy Agent.app"
 
-      - name: Upload artifact
+      # Upload binary artifact (for Electron embedding)
+      - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
-          retention-days: 7
+          retention-days: 30
+
+      # Upload macOS bundle (for standalone download)
+      - name: Upload macOS bundle
+        if: matrix.goos == 'darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.bundle }}
+          path: ${{ matrix.bundle }}
+          retention-days: 30
 
   release:
     needs: build
