@@ -39,9 +39,9 @@ type Message struct {
 	Recursive bool     `json:"recursive,omitempty"`
 	Error     string   `json:"error,omitempty"`
 	Connected bool     `json:"connected,omitempty"`
-	Size      int64    `json:"size,omitempty"`      // File size in bytes
-	Title     string   `json:"title,omitempty"`     // Dialog title
-	Filters   []string `json:"filters,omitempty"`   // File type filters (e.g., ["*.xlsx", "*.csv"])
+	Size      int64    `json:"size,omitempty"`       // File size in bytes
+	Title     string   `json:"title,omitempty"`      // Dialog title
+	Filters   []string `json:"filters,omitempty"`    // File type filters (e.g., ["*.xlsx", "*.csv"])
 	RequestID string   `json:"request_id,omitempty"` // To match request/response
 }
 
@@ -55,15 +55,19 @@ type FileEventSender interface {
 	SendWatchStarted(path string) error
 }
 
+// RouteRegistrar is a function that registers additional HTTP routes on the server mux
+type RouteRegistrar func(mux *http.ServeMux)
+
 // LocalServer is a WebSocket server for local browser connections
 type LocalServer struct {
-	port           string
-	upgrader       websocket.Upgrader
-	clients        map[*websocket.Conn]bool
-	clientsMu      sync.RWMutex
-	messageHandler MessageHandler
-	running        bool
-	server         *http.Server
+	port            string
+	upgrader        websocket.Upgrader
+	clients         map[*websocket.Conn]bool
+	clientsMu       sync.RWMutex
+	messageHandler  MessageHandler
+	running         bool
+	server          *http.Server
+	routeRegistrars []RouteRegistrar
 }
 
 // NewLocalServer creates a new local WebSocket server
@@ -121,6 +125,11 @@ func CheckExistingAgent(port string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// AddRouteRegistrar adds a function that will be called to register routes before the server starts
+func (s *LocalServer) AddRouteRegistrar(registrar RouteRegistrar) {
+	s.routeRegistrars = append(s.routeRegistrars, registrar)
+}
+
 // Start starts the local WebSocket server
 func (s *LocalServer) Start() error {
 	// Check if port is available
@@ -138,6 +147,11 @@ func (s *LocalServer) Start() error {
 
 	// WebSocket endpoint
 	mux.HandleFunc("/ws", s.handleWebSocket)
+
+	// Register external routes (bridge, files, etc.)
+	for _, registrar := range s.routeRegistrars {
+		registrar(mux)
+	}
 
 	s.server = &http.Server{
 		Addr:    "127.0.0.1:" + s.port,
@@ -281,6 +295,11 @@ func (s *LocalServer) Broadcast(msg Message) {
 		return
 	}
 
+	s.BroadcastRaw(data)
+}
+
+// BroadcastRaw sends raw bytes to all connected WebSocket clients
+func (s *LocalServer) BroadcastRaw(data []byte) {
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
 
@@ -307,7 +326,7 @@ func (s *LocalServer) SendFileChanged(path, name, operation string) error {
 func (s *LocalServer) SendFileWithContent(path, name, operation string) error {
 	var content []byte
 	var err error
-	
+
 	// Retry up to 5 times with increasing delay (handles file locking from Excel, etc.)
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {
@@ -315,7 +334,7 @@ func (s *LocalServer) SendFileWithContent(path, name, operation string) error {
 		if err == nil {
 			break
 		}
-		
+
 		// Wait before retry (100ms, 200ms, 300ms, 400ms, 500ms)
 		delay := time.Duration(100*(i+1)) * time.Millisecond
 		log.Debug().
@@ -326,7 +345,7 @@ func (s *LocalServer) SendFileWithContent(path, name, operation string) error {
 			Msg("File locked, retrying...")
 		time.Sleep(delay)
 	}
-	
+
 	if err != nil {
 		log.Error().Err(err).Str("path", path).Int("retries", maxRetries).Msg("Failed to read file after retries")
 		// Don't send event without content - it would be ignored by frontend anyway

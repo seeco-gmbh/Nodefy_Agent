@@ -8,10 +8,12 @@ import (
 
 // Config holds the agent configuration
 type Config struct {
-	Port      string   `json:"port"`                  // WebSocket server port (default: 9081)
-	FileTypes []string `json:"file_types,omitempty"`  // File types to watch (e.g., [".csv", ".xlsx"])
-	Recursive bool     `json:"recursive"`             // Watch directories recursively
-	Debug     bool     `json:"debug"`                 // Enable debug logging
+	Port         string   `json:"port"`                     // WebSocket server port (default: 9081)
+	FileTypes    []string `json:"file_types,omitempty"`     // File types to watch (e.g., [".csv", ".xlsx"])
+	Recursive    bool     `json:"recursive"`                // Watch directories recursively
+	Debug        bool     `json:"debug"`                    // Enable debug logging
+	BridgeURL    string   `json:"bridge_url,omitempty"`     // Adapt Bridge WebSocket URL
+	BridgeAPIKey string   `json:"bridge_api_key,omitempty"` // Adapt Bridge API key
 }
 
 // DefaultConfig returns a configuration with sensible defaults

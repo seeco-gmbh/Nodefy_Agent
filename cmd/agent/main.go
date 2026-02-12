@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 
+	"nodefy/agent/internal/bridge"
 	"nodefy/agent/internal/config"
 	"nodefy/agent/internal/dialog"
+	"nodefy/agent/internal/files"
 	"nodefy/agent/internal/logging"
 	"nodefy/agent/internal/server"
 	"nodefy/agent/internal/tray"
@@ -22,8 +24,9 @@ var (
 	version = "0.2.0"
 
 	// Global references for message handling
-	globalWatcher     *watcher.Watcher
-	globalLocalServer *server.LocalServer
+	globalWatcher      *watcher.Watcher
+	globalLocalServer  *server.LocalServer
+	globalBridgeClient *bridge.Client
 )
 
 func main() {
@@ -127,6 +130,19 @@ func runAgent(cfg *config.Config) {
 	localServer := server.NewLocalServer(cfg.Port, handleMessage)
 	globalLocalServer = localServer
 
+	// Create Adapt Bridge client and event forwarder
+	bridgeClient := bridge.NewClient()
+	globalBridgeClient = bridgeClient
+	eventForwarder := bridge.NewEventForwarder(localServer)
+	bridgeClient.SetEventHandler(eventForwarder.HandleBridgeEvent)
+
+	// Register bridge REST endpoints
+	bridgeHandlers := bridge.NewHandlers(bridgeClient)
+	localServer.AddRouteRegistrar(bridgeHandlers.RegisterRoutes)
+
+	// Register file export/import endpoints
+	localServer.AddRouteRegistrar(files.RegisterRoutes)
+
 	// Create file watcher
 	fileWatcher, err := watcher.New(
 		cfg.FileTypes,
@@ -151,11 +167,13 @@ func runAgent(cfg *config.Config) {
 	log.Info().
 		Str("ws", "ws://localhost:"+cfg.Port+"/ws").
 		Str("status", "http://localhost:"+cfg.Port+"/status").
+		Str("api", "http://localhost:"+cfg.Port+"/api/adapt/*").
 		Msg("Agent ready")
 
 	// Cleanup function
 	cleanup := func() {
 		log.Info().Msg("Shutting down...")
+		bridgeClient.Disconnect()
 		localServer.Stop()
 		fileWatcher.Stop()
 		log.Info().Msg("Agent stopped")
