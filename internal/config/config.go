@@ -6,17 +6,15 @@ import (
 	"path/filepath"
 )
 
-// Config holds the agent configuration
 type Config struct {
-	Port         string   `json:"port"`                     // WebSocket server port (default: 9081)
-	FileTypes    []string `json:"file_types,omitempty"`     // File types to watch (e.g., [".csv", ".xlsx"])
-	Recursive    bool     `json:"recursive"`                // Watch directories recursively
-	Debug        bool     `json:"debug"`                    // Enable debug logging
-	BridgeURL    string   `json:"bridge_url,omitempty"`     // Adapt Bridge WebSocket URL
-	BridgeAPIKey string   `json:"bridge_api_key,omitempty"` // Adapt Bridge API key
+	Port         string   `json:"port"`
+	FileTypes    []string `json:"file_types,omitempty"`
+	Recursive    bool     `json:"recursive"`
+	Debug        bool     `json:"debug"`
+	BridgeURL    string   `json:"bridge_url,omitempty"`
+	BridgeAPIKey string   `json:"bridge_api_key,omitempty"`
 }
 
-// DefaultConfig returns a configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
 		Port:      "9081",
@@ -26,7 +24,6 @@ func DefaultConfig() *Config {
 	}
 }
 
-// ConfigDir returns the nodefy config directory path
 func ConfigDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -35,17 +32,14 @@ func ConfigDir() string {
 	return filepath.Join(home, ".nodefy")
 }
 
-// ConfigPath returns the default config file path
 func ConfigPath() string {
 	return filepath.Join(ConfigDir(), "agent.json")
 }
 
-// LogPath returns the default log file path
 func LogPath() string {
 	return filepath.Join(ConfigDir(), "agent.log")
 }
 
-// Load loads configuration from file
 func Load(path string) (*Config, error) {
 	if path == "" {
 		path = ConfigPath()
@@ -56,24 +50,22 @@ func Load(path string) (*Config, error) {
 		if os.IsNotExist(err) {
 			return DefaultConfig(), nil
 		}
-		return DefaultConfig(), nil // Return defaults on any read error
+		return DefaultConfig(), nil
 	}
 
 	config := DefaultConfig()
 	if err := json.Unmarshal(data, config); err != nil {
-		return DefaultConfig(), nil // Return defaults on parse error
+		return DefaultConfig(), nil
 	}
 
 	return config, nil
 }
 
-// Save saves configuration to file
 func (c *Config) Save(path string) error {
 	if path == "" {
 		path = ConfigPath()
 	}
 
-	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"nodefy/agent/assets"
 	"nodefy/agent/internal/bridge"
 	"nodefy/agent/internal/config"
 	"nodefy/agent/internal/dialog"
@@ -20,17 +21,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var (
-	version = "0.2.0"
-
-	// Global references for message handling
-	globalWatcher      *watcher.Watcher
-	globalLocalServer  *server.LocalServer
-	globalBridgeClient *bridge.Client
-)
+var version = "0.2.0"
 
 func main() {
-	// Setup file logging first (before anything else)
 	logFile, err := logging.SetupFileLogging()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to setup file logging: %v\n", err)
@@ -39,27 +32,20 @@ func main() {
 		defer logFile.Close()
 	}
 
-	// Panic recovery with error dialog (especially useful on Windows)
 	defer logging.RecoverWithDialog()
 
-	// Command line flags
 	port := flag.String("port", "", "WebSocket server port (default: 9081)")
 	portShort := flag.String("p", "", "WebSocket server port (shorthand)")
-
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	debugShort := flag.Bool("d", false, "Enable debug logging (shorthand)")
-
 	showVersion := flag.Bool("version", false, "Show version")
 	showVersionShort := flag.Bool("v", false, "Show version (shorthand)")
-
 	configPath := flag.String("config", "", "Path to config file")
 	configPathShort := flag.String("c", "", "Path to config file (shorthand)")
-
 	initConfig := flag.Bool("init", false, "Create default config file")
 
 	flag.Parse()
 
-	// Resolve shorthand flags
 	if *portShort != "" {
 		*port = *portShort
 	}
@@ -73,19 +59,16 @@ func main() {
 		*configPath = *configPathShort
 	}
 
-	// Show version
 	if *showVersion {
 		fmt.Printf("Nodefy Agent v%s\n", version)
 		return
 	}
 
-	// Load configuration
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to load config")
 	}
 
-	// Override config with command line flags
 	if *port != "" {
 		cfg.Port = *port
 	}
@@ -93,7 +76,6 @@ func main() {
 		cfg.Debug = true
 	}
 
-	// Initialize config file
 	if *initConfig {
 		path := *configPath
 		if path == "" {
@@ -106,45 +88,64 @@ func main() {
 		return
 	}
 
-	// Setup console logging based on debug flag
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	if cfg.Debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	} else {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	}
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	// Run the agent
 	runAgent(cfg)
 }
 
 func runAgent(cfg *config.Config) {
+	dialog.Init()
+
 	log.Info().
 		Str("version", version).
 		Str("port", cfg.Port).
 		Msg("Starting Nodefy Agent")
 
-	// Create local WebSocket server
-	localServer := server.NewLocalServer(cfg.Port, handleMessage)
-	globalLocalServer = localServer
+	var fileWatcher *watcher.Watcher
+	var localServer *server.LocalServer
 
-	// Create Adapt Bridge client and event forwarder
+	handleMessage := func(msg server.Message) {
+		log.Debug().Str("type", msg.Type).Msg("Received message")
+
+		switch msg.Type {
+		case server.TypeWatch:
+			log.Info().Str("path", msg.Path).Bool("recursive", msg.Recursive).Msg("Adding watch path")
+			if err := fileWatcher.Watch(msg.Path); err != nil {
+				log.Error().Err(err).Str("path", msg.Path).Msg("Failed to add watch path")
+			} else {
+				log.Info().Str("path", msg.Path).Msg("Watch path added")
+				localServer.SendWatchStarted(msg.Path)
+			}
+		case server.TypeUnwatch:
+			log.Info().Str("path", msg.Path).Msg("Removing watch path")
+			if err := fileWatcher.Unwatch(msg.Path); err != nil {
+				log.Error().Err(err).Str("path", msg.Path).Msg("Failed to remove watch path")
+			} else {
+				log.Info().Str("path", msg.Path).Msg("Watch path removed")
+			}
+		case server.TypeOpenFileDialog:
+			go handleFileDialog(localServer, fileWatcher, msg)
+		}
+	}
+
+	localServer = server.NewLocalServer(cfg.Port, version, handleMessage)
+
 	bridgeClient := bridge.NewClient()
-	globalBridgeClient = bridgeClient
 	eventForwarder := bridge.NewEventForwarder(localServer)
 	bridgeClient.SetEventHandler(eventForwarder.HandleBridgeEvent)
 
-	// Register bridge REST endpoints
 	bridgeHandlers := bridge.NewHandlers(bridgeClient)
 	localServer.AddRouteRegistrar(bridgeHandlers.RegisterRoutes)
-
-	// Register file export/import endpoints
 	localServer.AddRouteRegistrar(files.RegisterRoutes)
 
-	// Create file watcher
-	fileWatcher, err := watcher.New(
+	var err error
+	fileWatcher, err = watcher.New(
 		cfg.FileTypes,
 		cfg.Recursive,
 		func(event watcher.Event) {
@@ -154,14 +155,11 @@ func runAgent(cfg *config.Config) {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create file watcher")
 	}
-	globalWatcher = fileWatcher
 
-	// Start local server
 	if err := localServer.Start(); err != nil {
 		log.Fatal().Err(err).Msg("Failed to start local server")
 	}
 
-	// Start file watcher
 	fileWatcher.Start()
 
 	log.Info().
@@ -170,7 +168,6 @@ func runAgent(cfg *config.Config) {
 		Str("api", "http://localhost:"+cfg.Port+"/api/adapt/*").
 		Msg("Agent ready")
 
-	// Cleanup function
 	cleanup := func() {
 		log.Info().Msg("Shutting down...")
 		bridgeClient.Disconnect()
@@ -179,18 +176,12 @@ func runAgent(cfg *config.Config) {
 		log.Info().Msg("Agent stopped")
 	}
 
-	// System tray (blocking - runs on main thread)
+	tray.SetIcons(assets.IconWhite, assets.IconBlue)
 	sysTray := tray.New(localServer, cleanup)
 	sysTray.Run()
 }
 
 func handleFileEvent(srv *server.LocalServer, event watcher.Event) {
-	log.Debug().
-		Str("path", event.Path).
-		Str("name", event.Name).
-		Str("op", event.Operation).
-		Msg("File event")
-
 	switch event.Operation {
 	case "create", "modify":
 		if err := srv.SendFileWithContent(event.Path, event.Name, event.Operation); err != nil {
@@ -203,40 +194,18 @@ func handleFileEvent(srv *server.LocalServer, event watcher.Event) {
 	}
 }
 
-func handleMessage(msg server.Message) {
-	log.Debug().Str("type", msg.Type).Msg("Received message")
-
-	switch msg.Type {
-	case server.TypeWatch:
-		// Add new watch path
-		log.Info().Str("path", msg.Path).Bool("recursive", msg.Recursive).Msg("Adding watch path")
-		if globalWatcher != nil {
-			if err := globalWatcher.Watch(msg.Path); err != nil {
-				log.Error().Err(err).Str("path", msg.Path).Msg("Failed to add watch path")
-			} else {
-				log.Info().Str("path", msg.Path).Msg("Watch path added")
-				if globalLocalServer != nil {
-					globalLocalServer.SendWatchStarted(msg.Path)
-				}
-			}
+func handleFileDialog(localServer *server.LocalServer, fileWatcher *watcher.Watcher, msg server.Message) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().Msgf("Recovered from panic in handleFileDialog: %v", r)
+			localServer.Broadcast(server.Message{
+				Type:      server.TypeError,
+				Error:     fmt.Sprintf("dialog crashed: %v", r),
+				RequestID: msg.RequestID,
+			})
 		}
-	case server.TypeUnwatch:
-		// Remove watch path
-		log.Info().Str("path", msg.Path).Msg("Removing watch path")
-		if globalWatcher != nil {
-			if err := globalWatcher.Unwatch(msg.Path); err != nil {
-				log.Error().Err(err).Str("path", msg.Path).Msg("Failed to remove watch path")
-			} else {
-				log.Info().Str("path", msg.Path).Msg("Watch path removed")
-			}
-		}
-	case server.TypeOpenFileDialog:
-		// Open native file dialog
-		go handleFileDialog(msg)
-	}
-}
+	}()
 
-func handleFileDialog(msg server.Message) {
 	log.Info().Str("title", msg.Title).Strs("filters", msg.Filters).Msg("Opening file dialog")
 
 	title := msg.Title
@@ -247,41 +216,30 @@ func handleFileDialog(msg server.Message) {
 	fileInfo, err := dialog.OpenFileDialog(title, msg.Filters)
 	if err != nil {
 		log.Error().Err(err).Msg("File dialog error")
-		if globalLocalServer != nil {
-			globalLocalServer.Broadcast(server.Message{
-				Type:      server.TypeError,
-				Error:     err.Error(),
-				RequestID: msg.RequestID,
-			})
-		}
+		localServer.Broadcast(server.Message{
+			Type:      server.TypeError,
+			Error:     err.Error(),
+			RequestID: msg.RequestID,
+		})
 		return
 	}
 
 	if fileInfo == nil {
-		// User cancelled
 		log.Info().Msg("File dialog cancelled")
-		if globalLocalServer != nil {
-			globalLocalServer.Broadcast(server.Message{
-				Type:      server.TypeDialogCanceled,
-				RequestID: msg.RequestID,
-			})
-		}
+		localServer.Broadcast(server.Message{
+			Type:      server.TypeDialogCanceled,
+			RequestID: msg.RequestID,
+		})
 		return
 	}
 
 	log.Info().Str("path", fileInfo.Path).Str("name", fileInfo.Name).Int64("size", fileInfo.Size).Msg("File selected")
 
-	// Auto-start watching the file
-	if globalWatcher != nil {
-		if err := globalWatcher.Watch(fileInfo.Path); err != nil {
-			log.Warn().Err(err).Str("path", fileInfo.Path).Msg("Failed to auto-watch selected file")
-		} else {
-			log.Info().Str("path", fileInfo.Path).Msg("Auto-watching selected file")
-		}
+	if err := fileWatcher.Watch(fileInfo.Path); err != nil {
+		log.Warn().Err(err).Str("path", fileInfo.Path).Msg("Failed to auto-watch selected file")
+	} else {
+		log.Info().Str("path", fileInfo.Path).Msg("Auto-watching selected file")
 	}
 
-	// Send file_selected with content
-	if globalLocalServer != nil {
-		globalLocalServer.SendFileSelected(fileInfo.Path, fileInfo.Name, fileInfo.Size, msg.RequestID)
-	}
+	localServer.SendFileSelected(fileInfo.Path, fileInfo.Name, fileInfo.Size, msg.RequestID)
 }

@@ -17,12 +17,13 @@ type Tray struct {
 	onQuit func()
 }
 
+func SetIcons(white, blue []byte) {}
+
 func New(statusProvider StatusProvider, onQuit func()) *Tray {
 	return &Tray{onQuit: onQuit}
 }
 
 func (t *Tray) Run() {
-	// No systray - just wait for signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
@@ -30,5 +31,3 @@ func (t *Tray) Run() {
 		t.onQuit()
 	}
 }
-
-func (t *Tray) UpdateStatus(connections int) {}

@@ -125,8 +125,3 @@ func WaitForCondition(condition func() bool, timeout, interval time.Duration) bo
 	}
 	return false
 }
-
-// GenerateTestToken returns a unique test token
-func GenerateTestToken() string {
-	return fmt.Sprintf("test-token-%d", time.Now().UnixNano())
-}

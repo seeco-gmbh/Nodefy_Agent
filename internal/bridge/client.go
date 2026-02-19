@@ -11,21 +11,18 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// BridgeMessage represents a message sent to the Adapt Bridge
 type BridgeMessage struct {
 	Type      string      `json:"type"`
 	Payload   interface{} `json:"payload"`
 	RequestID string      `json:"requestId,omitempty"`
 }
 
-// BridgeResponse represents a message received from the Adapt Bridge
 type BridgeResponse struct {
 	Method    string          `json:"method"`
 	Payload   json.RawMessage `json:"payload"`
 	RequestID string          `json:"requestId,omitempty"`
 }
 
-// pendingRequest tracks an in-flight request waiting for a response
 type pendingRequest struct {
 	expectedMethod string
 	filter         func(method string, payload json.RawMessage) bool
@@ -37,10 +34,8 @@ type pendingResult struct {
 	err     error
 }
 
-// EventHandler is called when the bridge sends an unsolicited event
 type EventHandler func(method string, payload json.RawMessage)
 
-// Client manages the WebSocket connection to the Adapt Bridge
 type Client struct {
 	ws                *websocket.Conn
 	url               string
@@ -58,7 +53,6 @@ type Client struct {
 	reconnectBackoff  float64
 }
 
-// NewClient creates a new Bridge client
 func NewClient() *Client {
 	return &Client{
 		pendingRequests:  make(map[string]*pendingRequest),
@@ -68,21 +62,18 @@ func NewClient() *Client {
 	}
 }
 
-// SetEventHandler sets the callback for unsolicited bridge events
 func (c *Client) SetEventHandler(handler EventHandler) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.eventHandler = handler
 }
 
-// IsConnected returns whether the client is connected to the bridge
 func (c *Client) IsConnected() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.isConnected
 }
 
-// Connect establishes a WebSocket connection to the Adapt Bridge
 func (c *Client) Connect(url string, apiKey string) error {
 	c.mu.Lock()
 	if c.isConnected {
@@ -112,14 +103,11 @@ func (c *Client) Connect(url string, apiKey string) error {
 	c.done = make(chan struct{})
 	c.mu.Unlock()
 
-	// Start read loop
 	go c.readLoop()
 
-	// Authenticate if API key is provided
 	if apiKey != "" {
 		if err := c.authenticate(); err != nil {
 			log.Warn().Err(err).Msg("Bridge authentication failed")
-			// Don't disconnect — some bridges work without auth
 		}
 	}
 
@@ -127,7 +115,6 @@ func (c *Client) Connect(url string, apiKey string) error {
 	return nil
 }
 
-// Disconnect closes the WebSocket connection
 func (c *Client) Disconnect() error {
 	c.mu.Lock()
 
@@ -138,10 +125,8 @@ func (c *Client) Disconnect() error {
 
 	log.Info().Msg("Disconnecting from Adapt Bridge")
 
-	// Signal readLoop to stop
 	close(c.done)
 
-	// Close WebSocket
 	err := c.ws.WriteMessage(
 		websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "User disconnected"),
@@ -157,7 +142,6 @@ func (c *Client) Disconnect() error {
 	c.done = nil
 	c.mu.Unlock()
 
-	// Reject all pending requests (outside mu lock to avoid deadlock with pendingMu)
 	c.pendingMu.Lock()
 	for id, req := range c.pendingRequests {
 		req.ch <- pendingResult{err: fmt.Errorf("connection closed")}
@@ -169,7 +153,6 @@ func (c *Client) Disconnect() error {
 	return nil
 }
 
-// Send sends a message to the bridge without waiting for a response
 func (c *Client) Send(msgType string, payload interface{}, requestID string) error {
 	msg := BridgeMessage{
 		Type:      msgType,
@@ -196,7 +179,6 @@ func (c *Client) Send(msgType string, payload interface{}, requestID string) err
 	return nil
 }
 
-// SendAndWait sends a message and waits for a matching response
 func (c *Client) SendAndWait(
 	msgType string,
 	payload interface{},
@@ -217,7 +199,6 @@ func (c *Client) SendAndWait(
 	c.pendingRequests[requestID] = req
 	c.pendingMu.Unlock()
 
-	// Send the message
 	if err := c.Send(msgType, payload, requestID); err != nil {
 		c.pendingMu.Lock()
 		delete(c.pendingRequests, requestID)
@@ -225,11 +206,13 @@ func (c *Client) SendAndWait(
 		return nil, err
 	}
 
-	// Wait for response or timeout
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
 	case result := <-ch:
 		return result.payload, result.err
-	case <-time.After(timeout):
+	case <-timer.C:
 		c.pendingMu.Lock()
 		delete(c.pendingRequests, requestID)
 		c.pendingMu.Unlock()
@@ -237,7 +220,6 @@ func (c *Client) SendAndWait(
 	}
 }
 
-// authenticate sends an authentication request to the bridge
 func (c *Client) authenticate() error {
 	payload := map[string]string{"apiKey": c.apiKey}
 	_, err := c.SendAndWait("Authenticate", payload, "Authenticated", nil, 5*time.Second)
@@ -253,9 +235,7 @@ func (c *Client) authenticate() error {
 	return nil
 }
 
-// readLoop reads messages from the WebSocket and routes them
 func (c *Client) readLoop() {
-	// Capture ws locally so we don't access c.ws after Disconnect sets it to nil
 	c.mu.RLock()
 	ws := c.ws
 	c.mu.RUnlock()
@@ -272,7 +252,6 @@ func (c *Client) readLoop() {
 		c.ws = nil
 		c.mu.Unlock()
 
-		// Reject all pending requests
 		c.pendingMu.Lock()
 		for id, req := range c.pendingRequests {
 			req.ch <- pendingResult{err: fmt.Errorf("connection lost")}
@@ -281,7 +260,6 @@ func (c *Client) readLoop() {
 		c.pendingMu.Unlock()
 
 		if wasConnected {
-			// Emit disconnected event
 			c.mu.RLock()
 			handler := c.eventHandler
 			c.mu.RUnlock()
@@ -290,7 +268,6 @@ func (c *Client) readLoop() {
 				handler("Disconnected", disconnectPayload)
 			}
 
-			// Attempt reconnect
 			go c.reconnect()
 		}
 	}()
@@ -316,17 +293,14 @@ func (c *Client) readLoop() {
 			continue
 		}
 
-		// Skip heartbeats
 		if resp.Method == "Heartbeat" {
 			continue
 		}
 
-		// Check if this resolves a pending request
 		if c.resolvePending(resp) {
 			continue
 		}
 
-		// Otherwise, it's an unsolicited event — forward to handler
 		c.mu.RLock()
 		handler := c.eventHandler
 		c.mu.RUnlock()
@@ -336,14 +310,12 @@ func (c *Client) readLoop() {
 	}
 }
 
-// resolvePending checks if a response matches a pending request
 func (c *Client) resolvePending(resp BridgeResponse) bool {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 
 	isError := resp.Method == "Error"
 
-	// First: try to match by requestId
 	if resp.RequestID != "" {
 		if req, ok := c.pendingRequests[resp.RequestID]; ok {
 			delete(c.pendingRequests, resp.RequestID)
@@ -364,7 +336,6 @@ func (c *Client) resolvePending(resp BridgeResponse) bool {
 		}
 	}
 
-	// If error, reject the first pending request
 	if isError {
 		for id, req := range c.pendingRequests {
 			delete(c.pendingRequests, id)
@@ -381,7 +352,6 @@ func (c *Client) resolvePending(resp BridgeResponse) bool {
 		}
 	}
 
-	// Match by expectedMethod or filter
 	for id, req := range c.pendingRequests {
 		matched := false
 		if req.expectedMethod == resp.Method {
@@ -400,7 +370,6 @@ func (c *Client) resolvePending(resp BridgeResponse) bool {
 	return false
 }
 
-// reconnect attempts to reconnect to the bridge with exponential backoff
 func (c *Client) reconnect() {
 	c.mu.RLock()
 	url := c.url
@@ -417,7 +386,6 @@ func (c *Client) reconnect() {
 		log.Info().Int("attempt", attempt).Dur("delay", delay).Msg("Reconnecting to Adapt Bridge")
 		time.Sleep(delay)
 
-		// Check if we were manually disconnected (done=nil means Disconnect was called)
 		c.mu.RLock()
 		manualDisconnect := c.done == nil
 		alreadyConnected := c.isConnected
@@ -433,7 +401,6 @@ func (c *Client) reconnect() {
 
 		log.Info().Int("attempt", attempt).Msg("Reconnected to Adapt Bridge")
 
-		// Emit reconnected event
 		c.mu.RLock()
 		handler := c.eventHandler
 		c.mu.RUnlock()
@@ -447,7 +414,6 @@ func (c *Client) reconnect() {
 	log.Error().Int("maxAttempts", maxReconnect).Msg("Failed to reconnect to Adapt Bridge")
 }
 
-// GetStatus returns the current connection status
 func (c *Client) GetStatus() map[string]interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

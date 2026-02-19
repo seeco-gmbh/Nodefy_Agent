@@ -4,7 +4,6 @@ package dialog
 
 import "errors"
 
-// FileInfo contains information about a selected file
 type FileInfo struct {
 	Path string `json:"path"`
 	Name string `json:"name"`
@@ -13,12 +12,16 @@ type FileInfo struct {
 
 var ErrNotSupported = errors.New("file dialogs not supported in this build")
 
-// OpenFileDialog is a stub for non-CGO builds
+func Init() {}
+
 func OpenFileDialog(title string, filters []string) (*FileInfo, error) {
 	return nil, ErrNotSupported
 }
 
-// OpenFolderDialog is a stub for non-CGO builds
+func SaveFileDialog(title, defaultName string, filters []string) (string, error) {
+	return "", ErrNotSupported
+}
+
 func OpenFolderDialog(title string) (string, error) {
 	return "", ErrNotSupported
 }
