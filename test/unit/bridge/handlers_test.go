@@ -1,6 +1,7 @@
 package bridge_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,7 +32,11 @@ var _ = Describe("Bridge Handlers", func() {
 
 			c := bridge.NewClient()
 			h := bridge.NewHandlers(c)
-			defer c.Disconnect()
+			defer func() {
+			if err := c.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			body := strings.NewReader(`{"url":"` + helpers.WsURL(wsServer) + `"}`)
 			req := httptest.NewRequest(http.MethodPost, "/api/adapt/connect", body)
@@ -94,7 +99,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should return connected status with bridge info", func() {
 			client, server := connectClient(helpers.EchoHandler("BridgeStatus", `{"version":"1.0"}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -129,7 +138,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should create a component", func() {
 			client, server := connectClient(helpers.EchoHandler("Created", `{"id":"mod-1","Type":"Module"}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -149,7 +162,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should reject missing componentType", func() {
 			client, server := connectClient(helpers.EchoHandler("Created", `{}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -168,7 +185,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should return component details", func() {
 			client, server := connectClient(helpers.EchoHandler("ComponentDetails", `{"id":"comp-1","name":"MyModule","ports":[]}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -188,7 +209,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should update a component", func() {
 			client, server := connectClient(helpers.EchoHandler("Updated", `{"id":"comp-1","name":"Renamed"}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -207,7 +232,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should delete a component", func() {
 			client, server := connectClient(helpers.EchoHandler("Deleted", `{"id":"comp-1"}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -224,7 +253,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should update a port", func() {
 			client, server := connectClient(helpers.EchoHandler("PortUpdated", `{"Id":"port-1","name":"renamed"}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -243,7 +276,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should connect two ports", func() {
 			client, server := connectClient(helpers.EchoHandler("Created", `{"Type":"Connector","id":"conn-1"}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -262,7 +299,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should execute a component", func() {
 			client, server := connectClient(helpers.EchoHandler("ExecutionCompleted", `{"success":true,"duration":123}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -281,7 +322,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should export a component", func() {
 			client, server := connectClient(helpers.EchoHandler("Exported", `{"xml":"<network/>","code":"abc"}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -300,7 +345,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should load a component from XML", func() {
 			client, server := connectClient(helpers.EchoHandler("Loaded", `{"id":"loaded-1","type":"Module"}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -319,7 +368,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should save a component", func() {
 			client, server := connectClient(helpers.EchoHandler("Saved", `{"success":true}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -338,7 +391,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should return template types", func() {
 			client, server := connectClient(helpers.EchoHandler("TemplateTypes", `{"TemplateGroups":[{"Group":"Math"}]}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -355,7 +412,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should sync components", func() {
 			client, server := connectClient(helpers.EchoHandler("BridgeStatus", `{"components":[]}`))
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 
@@ -393,7 +454,11 @@ var _ = Describe("Bridge Handlers", func() {
 		It("should return 500 when bridge does not respond", func() {
 			client, server := connectClient(helpers.SilentHandler())
 			defer server.Close()
-			defer client.Disconnect()
+			defer func() {
+			if err := client.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			h := bridge.NewHandlers(client)
 

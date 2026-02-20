@@ -131,22 +131,21 @@ func (c *Client) Disconnect() error {
 	c.isConnected = false
 	c.isAuthenticated = false
 
-	// Signal readLoop to stop — close only if not already closed.
+	// Close the done channel only if it hasn't been closed already.
 	if c.done != nil {
 		select {
 		case <-c.done:
-			// already closed, nothing to do
 		default:
 			close(c.done)
 		}
 	}
 
-	// Grab the ws reference and release the lock before blocking network I/O.
+	// Copy ws and release the lock before blocking network I/O to avoid
+	// holding the mutex during the close handshake.
 	ws := c.ws
 	c.ws = nil
 	c.mu.Unlock()
 
-	// Send the close handshake. This can block briefly but must not hold the lock.
 	err := ws.WriteMessage(
 		websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "User disconnected"),

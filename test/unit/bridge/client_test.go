@@ -2,6 +2,7 @@ package bridge_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"sync"
 	"time"
@@ -52,7 +53,7 @@ var _ = Describe("Bridge Client", func() {
 		})
 
 		AfterEach(func() {
-			c.Disconnect()
+			Expect(c.Disconnect()).To(Succeed())
 			if server != nil {
 				server.Close()
 			}
@@ -79,14 +80,12 @@ var _ = Describe("Bridge Client", func() {
 			server = helpers.MockBridgeServer(helpers.SilentHandler())
 			Expect(c.Connect(helpers.WsURL(server), "")).To(Succeed())
 
-			err := c.Disconnect()
-			Expect(err).NotTo(HaveOccurred())
+			Expect(c.Disconnect()).To(Succeed())
 			Expect(c.IsConnected()).To(BeFalse())
 		})
 
 		It("should be a no-op when disconnecting while not connected", func() {
-			err := c.Disconnect()
-			Expect(err).NotTo(HaveOccurred())
+			Expect(c.Disconnect()).To(Succeed())
 		})
 
 		It("should fail to connect to an invalid URL", func() {
@@ -113,7 +112,7 @@ var _ = Describe("Bridge Client", func() {
 
 		AfterEach(func() {
 			if c != nil {
-				c.Disconnect()
+				Expect(c.Disconnect()).To(Succeed())
 			}
 			if server != nil {
 				server.Close()
@@ -253,7 +252,11 @@ var _ = Describe("Bridge Client", func() {
 			c := bridge.NewClient()
 			err := c.Connect(helpers.WsURL(server), "test-api-key")
 			Expect(err).NotTo(HaveOccurred())
-			defer c.Disconnect()
+			defer func() {
+			if err := c.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			status := c.GetStatus()
 			Expect(status["authenticated"]).To(BeTrue())
@@ -295,7 +298,11 @@ var _ = Describe("Bridge Client", func() {
 			})
 
 			Expect(c.Connect(helpers.WsURL(server), "")).To(Succeed())
-			defer c.Disconnect()
+			defer func() {
+			if err := c.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			Eventually(done, 2*time.Second).Should(BeClosed())
 
@@ -345,7 +352,11 @@ var _ = Describe("Bridge Client", func() {
 			})
 
 			Expect(c.Connect(helpers.WsURL(server), "")).To(Succeed())
-			defer c.Disconnect()
+			defer func() {
+			if err := c.Disconnect(); err != nil {
+				fmt.Printf("test: failed to disconnect client: %v\n", err)
+			}
+		}()
 
 			Eventually(done, 2*time.Second).Should(BeClosed())
 
@@ -370,7 +381,7 @@ var _ = Describe("Bridge Client", func() {
 			}()
 
 			time.Sleep(50 * time.Millisecond)
-			c.Disconnect()
+			Expect(c.Disconnect()).To(Succeed())
 
 			Eventually(errCh, 2*time.Second).Should(Receive(HaveOccurred()))
 		})

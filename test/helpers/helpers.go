@@ -30,7 +30,11 @@ func MockBridgeServer(handler func(conn *websocket.Conn)) *httptest.Server {
 		if err != nil {
 			return
 		}
-		defer func() { _ = conn.Close() }()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				fmt.Printf("test: mock server conn close error: %v\n", err)
+			}
+		}()
 		handler(conn)
 	}))
 	return server
@@ -91,9 +95,10 @@ func ConcurrentEchoHandler(method string, payload string) func(conn *websocket.C
 			"requestId": msg.RequestID,
 		}
 		mu.Lock()
-		err = conn.WriteMessage(websocket.TextMessage, mustMarshal(resp))
+		var writeErr error
+		writeErr = conn.WriteMessage(websocket.TextMessage, mustMarshal(resp))
 		mu.Unlock()
-		if err != nil {
+		if writeErr != nil {
 			return
 		}
 		}

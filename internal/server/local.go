@@ -94,8 +94,9 @@ func checkPortAvailable(port string) error {
 	if err != nil {
 		return err
 	}
-	// Probe listener — close error is not actionable here.
-	_ = ln.Close()
+	if err := ln.Close(); err != nil {
+		log.Warn().Err(err).Str("addr", addr).Msg("Failed to close probe listener")
+	}
 	return nil
 }
 
@@ -238,7 +239,9 @@ func (s *LocalServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	log.Info().Str("remote", conn.RemoteAddr().String()).Msg("Client connected")
 
-	s.sendToClient(client, Message{Type: TypeStatus, Connected: true})
+	if err := s.sendToClient(client, Message{Type: TypeStatus, Connected: true}); err != nil {
+		log.Warn().Err(err).Msg("Failed to send initial status to client")
+	}
 
 	defer func() {
 		s.clientsMu.Lock()
@@ -267,7 +270,9 @@ func (s *LocalServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		log.Debug().Str("type", msg.Type).Str("path", msg.Path).Msg("Received message from client")
 
-		s.sendToClient(client, Message{Type: TypeAck})
+		if err := s.sendToClient(client, Message{Type: TypeAck}); err != nil {
+			log.Warn().Err(err).Msg("Failed to send ack to client")
+		}
 
 		if s.messageHandler != nil {
 			s.messageHandler(msg)

@@ -26,14 +26,12 @@ var version = "0.2.0"
 func main() {
 	logFile, err := logging.SetupFileLogging()
 	if err != nil {
-		// Startup warning to stderr — error intentionally ignored (non-fatal).
-		_, _ = fmt.Fprintf(os.Stderr, "Warning: Failed to setup file logging: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: Failed to setup file logging: %v\n", err) //nolint:errcheck
 	}
 	if logFile != nil {
 		defer func() {
 			if err := logFile.Close(); err != nil {
-				// Log file close at shutdown — best effort, stderr fallback.
-				_, _ = fmt.Fprintf(os.Stderr, "Warning: Failed to close log file: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Warning: Failed to close log file: %v\n", err) //nolint:errcheck
 			}
 		}()
 	}

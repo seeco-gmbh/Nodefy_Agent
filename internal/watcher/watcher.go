@@ -104,7 +104,6 @@ func (w *Watcher) watchDirectory(dir string) error {
 	w.mu.Unlock()
 
 	if !w.recursive {
-		// Fire initial events for matching files in this directory (non-recursive)
 		go w.emitInitialDirectoryEvents(dir, false)
 		return nil
 	}
@@ -134,7 +133,6 @@ func (w *Watcher) watchDirectory(dir string) error {
 		}
 	}
 
-	// Fire initial events for all matching files in the directory tree
 	go w.emitInitialDirectoryEvents(dir, true)
 
 	return nil
@@ -206,7 +204,9 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	case event.Op&fsnotify.Create == fsnotify.Create:
 		operation = "create"
 		if info, err := os.Stat(event.Name); err == nil && info.IsDir() && w.recursive {
-			w.watchDirectory(event.Name)
+			if err := w.watchDirectory(event.Name); err != nil {
+				log.Warn().Err(err).Str("path", event.Name).Msg("Failed to watch new directory")
+			}
 		}
 	case event.Op&fsnotify.Write == fsnotify.Write:
 		operation = "modify"

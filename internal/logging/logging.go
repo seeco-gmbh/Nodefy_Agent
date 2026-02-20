@@ -12,6 +12,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// stderrWarn prints to stderr before the structured logger is initialised.
+// Stderr write errors are not propagated — there is no further fallback.
+func stderrWarn(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...) //nolint:errcheck
+}
+
 func SetupFileLogging() (*os.File, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -27,10 +33,12 @@ func SetupFileLogging() (*os.File, error) {
 
 	if info, err := os.Stat(logPath); err == nil && info.Size() > 10*1024*1024 {
 		oldPath := logPath + ".old"
-		// Best-effort rotation: ignore errors — old backup may not exist, and
-		// a failed rename just means the log file continues to grow.
-		_ = os.Remove(oldPath)
-		_ = os.Rename(logPath, oldPath)
+		if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+			stderrWarn("failed to remove old log backup: %v", err)
+		}
+		if err := os.Rename(logPath, oldPath); err != nil {
+			stderrWarn("failed to rotate log file: %v", err)
+		}
 	}
 
 	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -64,8 +72,7 @@ func RecoverWithDialog() {
 		if runtime.GOOS == "windows" {
 			showWindowsErrorDialog(errMsg)
 		} else {
-			// Writing to stderr on fatal crash — error is intentionally ignored.
-			_, _ = fmt.Fprintf(os.Stderr, "FATAL: %s\n%s\n", errMsg, stack)
+			fmt.Fprintf(os.Stderr, "FATAL: %s\n%s\n", errMsg, stack) //nolint:errcheck
 		}
 
 		os.Exit(1)
