@@ -55,7 +55,9 @@ type wsClient struct {
 func (c *wsClient) writeMessage(messageType int, data []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return fmt.Errorf("set write deadline: %w", err)
+	}
 	return c.conn.WriteMessage(messageType, data)
 }
 
@@ -92,7 +94,8 @@ func checkPortAvailable(port string) error {
 	if err != nil {
 		return err
 	}
-	ln.Close()
+	// Probe listener — close error is not actionable here.
+	_ = ln.Close()
 	return nil
 }
 
@@ -154,12 +157,16 @@ func (s *LocalServer) Start() error {
 func (s *LocalServer) Stop() {
 	s.running = false
 	if s.server != nil {
-		s.server.Close()
+		if err := s.server.Close(); err != nil {
+			log.Warn().Err(err).Msg("Error closing HTTP server")
+		}
 	}
 
 	s.clientsMu.Lock()
 	for c := range s.clients {
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			log.Warn().Err(err).Msg("Error closing WebSocket client connection")
+		}
 	}
 	s.clients = make(map[*wsClient]bool)
 	s.clientsMu.Unlock()
@@ -207,11 +214,13 @@ func isAllowedOrigin(origin string) bool {
 
 func (s *LocalServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "running",
 		"version": s.version,
 		"clients": len(s.clients),
-	})
+	}); err != nil {
+		log.Warn().Err(err).Msg("Failed to write status response")
+	}
 }
 
 func (s *LocalServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -235,7 +244,9 @@ func (s *LocalServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.clientsMu.Lock()
 		delete(s.clients, client)
 		s.clientsMu.Unlock()
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			log.Warn().Err(err).Msg("Error closing WebSocket connection on disconnect")
+		}
 		log.Info().Str("remote", conn.RemoteAddr().String()).Msg("Client disconnected")
 	}()
 
@@ -296,7 +307,9 @@ func (s *LocalServer) BroadcastRaw(data []byte) {
 			s.clientsMu.Lock()
 			delete(s.clients, c)
 			s.clientsMu.Unlock()
-			c.conn.Close()
+			if err := c.conn.Close(); err != nil {
+				log.Warn().Err(err).Msg("Error closing unresponsive client connection")
+			}
 		}
 	}
 }

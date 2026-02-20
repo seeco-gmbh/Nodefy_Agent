@@ -111,7 +111,9 @@ func (h *Handlers) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var status map[string]interface{}
-	json.Unmarshal(result, &status)
+	if err := json.Unmarshal(result, &status); err != nil {
+		log.Warn().Err(err).Msg("Failed to parse bridge status response")
+	}
 	if status == nil {
 		status = map[string]interface{}{}
 	}
@@ -143,7 +145,9 @@ func (h *Handlers) HandleCreateComponent(w http.ResponseWriter, r *http.Request)
 			return false
 		}
 		var p map[string]interface{}
-		json.Unmarshal(payload, &p)
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return false
+		}
 		t, _ := p["Type"].(string)
 		if t == "" {
 			t, _ = p["type"].(string)
@@ -309,7 +313,9 @@ func (h *Handlers) HandleAddPort(w http.ResponseWriter, r *http.Request) {
 			return false
 		}
 		var p map[string]interface{}
-		json.Unmarshal(payload, &p)
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return false
+		}
 		t, _ := p["Type"].(string)
 		if t == "" {
 			t, _ = p["type"].(string)
@@ -348,7 +354,9 @@ func (h *Handlers) HandleDeletePort(w http.ResponseWriter, r *http.Request) {
 			return false
 		}
 		var p map[string]interface{}
-		json.Unmarshal(payload, &p)
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return false
+		}
 		t, _ := p["Type"].(string)
 		if t == "" {
 			t, _ = p["type"].(string)
@@ -389,7 +397,9 @@ func (h *Handlers) HandleUpdatePort(w http.ResponseWriter, r *http.Request) {
 			return false
 		}
 		var p map[string]interface{}
-		json.Unmarshal(payload, &p)
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return false
+		}
 		id, _ := p["Id"].(string)
 		if id == "" {
 			id, _ = p["id"].(string)
@@ -423,7 +433,9 @@ func (h *Handlers) HandleConnectPorts(w http.ResponseWriter, r *http.Request) {
 			return false
 		}
 		var p map[string]interface{}
-		json.Unmarshal(payload, &p)
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return false
+		}
 		t, _ := p["Type"].(string)
 		if t == "" {
 			t, _ = p["type"].(string)

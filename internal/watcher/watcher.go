@@ -110,7 +110,7 @@ func (w *Watcher) watchDirectory(dir string) error {
 	}
 
 	var dirs []string
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -118,7 +118,9 @@ func (w *Watcher) watchDirectory(dir string) error {
 			dirs = append(dirs, path)
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Warn().Err(err).Str("path", dir).Msg("Failed to walk directory for recursive watch setup")
+	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -242,7 +244,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 // emitInitialDirectoryEvents walks a directory and fires synthetic events
 // for all matching files so consumers get current content on watch start.
 func (w *Watcher) emitInitialDirectoryEvents(dir string, recursive bool) {
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -264,7 +266,9 @@ func (w *Watcher) emitInitialDirectoryEvents(dir string, recursive bool) {
 			Operation: "create",
 		})
 		return nil
-	})
+	}); err != nil {
+		log.Warn().Err(err).Str("path", dir).Msg("Failed to walk directory for initial events")
+	}
 }
 
 func (w *Watcher) isRelevantFile(path string) bool {

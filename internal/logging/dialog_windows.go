@@ -21,10 +21,16 @@ const (
 // showWindowsErrorDialog displays a Windows message box with the error
 func showWindowsErrorDialog(message string) {
 	title := "Nodefy Agent Error"
-	
-	titlePtr, _ := syscall.UTF16PtrFromString(title)
-	messagePtr, _ := syscall.UTF16PtrFromString(message + "\n\nCheck ~/.nodefy/agent.log for details.")
-	
+
+	titlePtr, err := syscall.UTF16PtrFromString(title)
+	if err != nil {
+		return
+	}
+	messagePtr, err := syscall.UTF16PtrFromString(message + "\n\nCheck ~/.nodefy/agent.log for details.")
+	if err != nil {
+		return
+	}
+
 	messageBoxW.Call(
 		0,
 		uintptr(unsafe.Pointer(messagePtr)),

@@ -12,6 +12,14 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func mustMarshal(v interface{}) []byte {
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic("test helper: failed to marshal JSON: " + err.Error())
+	}
+	return data
+}
+
 // MockBridgeServer creates a test WebSocket server with a custom handler
 func MockBridgeServer(handler func(conn *websocket.Conn)) *httptest.Server {
 	upgrader := websocket.Upgrader{
@@ -22,7 +30,7 @@ func MockBridgeServer(handler func(conn *websocket.Conn)) *httptest.Server {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		handler(conn)
 	}))
 	return server
@@ -42,18 +50,21 @@ func EchoHandler(method string, payload string) func(conn *websocket.Conn) {
 			if err != nil {
 				return
 			}
-			var msg struct {
-				RequestID string `json:"requestId"`
-			}
-			json.Unmarshal(data, &msg)
+		var msg struct {
+			RequestID string `json:"requestId"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return
+		}
 
-			resp := map[string]interface{}{
-				"method":    method,
-				"payload":   json.RawMessage(payload),
-				"requestId": msg.RequestID,
-			}
-			respData, _ := json.Marshal(resp)
-			conn.WriteMessage(websocket.TextMessage, respData)
+		resp := map[string]interface{}{
+			"method":    method,
+			"payload":   json.RawMessage(payload),
+			"requestId": msg.RequestID,
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, mustMarshal(resp)); err != nil {
+			return
+		}
 		}
 	}
 }
@@ -67,20 +78,24 @@ func ConcurrentEchoHandler(method string, payload string) func(conn *websocket.C
 			if err != nil {
 				return
 			}
-			var msg struct {
-				RequestID string `json:"requestId"`
-			}
-			json.Unmarshal(data, &msg)
+		var msg struct {
+			RequestID string `json:"requestId"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return
+		}
 
-			resp := map[string]interface{}{
-				"method":    method,
-				"payload":   json.RawMessage(payload),
-				"requestId": msg.RequestID,
-			}
-			respData, _ := json.Marshal(resp)
-			mu.Lock()
-			conn.WriteMessage(websocket.TextMessage, respData)
-			mu.Unlock()
+		resp := map[string]interface{}{
+			"method":    method,
+			"payload":   json.RawMessage(payload),
+			"requestId": msg.RequestID,
+		}
+		mu.Lock()
+		err = conn.WriteMessage(websocket.TextMessage, mustMarshal(resp))
+		mu.Unlock()
+		if err != nil {
+			return
+		}
 		}
 	}
 }

@@ -50,7 +50,9 @@ func HandleExportFile(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, req.Filename))
 		w.WriteHeader(http.StatusOK)
-		w.Write(req.Data)
+		if _, err := w.Write(req.Data); err != nil {
+			log.Warn().Err(err).Msg("Failed to write export response body")
+		}
 		return
 	}
 
@@ -63,7 +65,9 @@ func HandleExportFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, req.Filename))
 	w.WriteHeader(http.StatusOK)
-	w.Write(pretty)
+	if _, err := w.Write(pretty); err != nil {
+		log.Warn().Err(err).Msg("Failed to write export response body")
+	}
 }
 
 func HandleImportFile(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +210,13 @@ func HandleSaveFile(w http.ResponseWriter, r *http.Request) {
 	var parsed interface{}
 	var fileContent []byte
 	if err := json.Unmarshal(req.Data, &parsed); err == nil {
-		fileContent, _ = json.MarshalIndent(parsed, "", "  ")
+		indented, err := json.MarshalIndent(parsed, "", "  ")
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to pretty-print JSON, using raw bytes")
+			fileContent = req.Data
+		} else {
+			fileContent = indented
+		}
 	} else {
 		fileContent = req.Data
 	}

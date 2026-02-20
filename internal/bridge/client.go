@@ -154,7 +154,9 @@ func (c *Client) Disconnect() error {
 	if err != nil {
 		log.Warn().Err(err).Msg("Error sending close message")
 	}
-	ws.Close()
+	if err := ws.Close(); err != nil {
+		log.Warn().Err(err).Msg("Error closing WebSocket connection")
+	}
 
 	c.pendingMu.Lock()
 	for id, req := range c.pendingRequests {

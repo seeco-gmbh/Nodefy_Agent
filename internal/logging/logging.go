@@ -27,8 +27,10 @@ func SetupFileLogging() (*os.File, error) {
 
 	if info, err := os.Stat(logPath); err == nil && info.Size() > 10*1024*1024 {
 		oldPath := logPath + ".old"
-		os.Remove(oldPath)
-		os.Rename(logPath, oldPath)
+		// Best-effort rotation: ignore errors — old backup may not exist, and
+		// a failed rename just means the log file continues to grow.
+		_ = os.Remove(oldPath)
+		_ = os.Rename(logPath, oldPath)
 	}
 
 	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -36,7 +38,9 @@ func SetupFileLogging() (*os.File, error) {
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	fmt.Fprintf(file, "\n=== Nodefy Agent started at %s ===\n", time.Now().Format(time.RFC3339))
+	if _, err := fmt.Fprintf(file, "\n=== Nodefy Agent started at %s ===\n", time.Now().Format(time.RFC3339)); err != nil {
+		log.Warn().Err(err).Msg("Failed to write log header")
+	}
 
 	multi := io.MultiWriter(file, zerolog.ConsoleWriter{Out: os.Stderr})
 	log.Logger = zerolog.New(multi).With().Timestamp().Logger()
@@ -60,7 +64,8 @@ func RecoverWithDialog() {
 		if runtime.GOOS == "windows" {
 			showWindowsErrorDialog(errMsg)
 		} else {
-			fmt.Fprintf(os.Stderr, "FATAL: %s\n%s\n", errMsg, stack)
+			// Writing to stderr on fatal crash — error is intentionally ignored.
+			_, _ = fmt.Fprintf(os.Stderr, "FATAL: %s\n%s\n", errMsg, stack)
 		}
 
 		os.Exit(1)

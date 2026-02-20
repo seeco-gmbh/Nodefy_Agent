@@ -70,8 +70,8 @@ var _ = Describe("EventForwarder", func() {
 
 			methods := make([]string, 3)
 			for i, msg := range msgs {
-				var event map[string]interface{}
-				json.Unmarshal(msg, &event)
+			var event map[string]interface{}
+			Expect(json.Unmarshal(msg, &event)).To(Succeed())
 				methods[i] = event["method"].(string)
 			}
 

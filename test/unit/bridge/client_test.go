@@ -14,6 +14,14 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+func mustMarshal(v interface{}) []byte {
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic("test: failed to marshal JSON: " + err.Error())
+	}
+	return data
+}
+
 var _ = Describe("Bridge Client", func() {
 
 	Describe("NewClient", func() {
@@ -152,32 +160,35 @@ var _ = Describe("Bridge Client", func() {
 					if err != nil {
 						return
 					}
-					resp := map[string]interface{}{
-						"method":  "Created",
-						"payload": json.RawMessage(`{"Type":"Module","id":"mod-1"}`),
-					}
-					data, _ := json.Marshal(resp)
-					conn.WriteMessage(websocket.TextMessage, data)
-				}
+			resp := map[string]interface{}{
+				"method":  "Created",
+				"payload": json.RawMessage(`{"Type":"Module","id":"mod-1"}`),
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, mustMarshal(resp)); err != nil {
+				return
+			}
+			}
 			})
 			c = bridge.NewClient()
 			Expect(c.Connect(helpers.WsURL(server), "")).To(Succeed())
 
-			filter := func(method string, payload json.RawMessage) bool {
-				if method != "Created" {
-					return false
-				}
-				var p map[string]interface{}
-				json.Unmarshal(payload, &p)
-				return p["Type"] == "Module"
+		filter := func(method string, payload json.RawMessage) bool {
+			if method != "Created" {
+				return false
 			}
+			var p map[string]interface{}
+			if err := json.Unmarshal(payload, &p); err != nil {
+				return false
+			}
+			return p["Type"] == "Module"
+		}
 
-			result, err := c.SendAndWait("CreateComponent", map[string]string{"componentType": "Module"}, "Created", filter, 2*time.Second)
-			Expect(err).NotTo(HaveOccurred())
+		result, err := c.SendAndWait("CreateComponent", map[string]string{"componentType": "Module"}, "Created", filter, 2*time.Second)
+		Expect(err).NotTo(HaveOccurred())
 
-			var payload map[string]string
-			json.Unmarshal(result, &payload)
-			Expect(payload["id"]).To(Equal("mod-1"))
+		var payload map[string]string
+		Expect(json.Unmarshal(result, &payload)).To(Succeed())
+		Expect(payload["id"]).To(Equal("mod-1"))
 		})
 
 		It("should handle concurrent requests", func() {
@@ -217,21 +228,24 @@ var _ = Describe("Bridge Client", func() {
 					if err != nil {
 						return
 					}
-					var msg struct {
-						Type      string `json:"type"`
-						RequestID string `json:"requestId"`
-					}
-					json.Unmarshal(data, &msg)
+				var msg struct {
+					Type      string `json:"type"`
+					RequestID string `json:"requestId"`
+				}
+				if err := json.Unmarshal(data, &msg); err != nil {
+					return
+				}
 
-					if msg.Type == "Authenticate" {
-						resp := map[string]interface{}{
-							"method":    "Authenticated",
-							"payload":   json.RawMessage(`{"success":true}`),
-							"requestId": msg.RequestID,
-						}
-						respData, _ := json.Marshal(resp)
-						conn.WriteMessage(websocket.TextMessage, respData)
-					}
+				if msg.Type == "Authenticate" {
+				resp := map[string]interface{}{
+					"method":    "Authenticated",
+					"payload":   json.RawMessage(`{"success":true}`),
+					"requestId": msg.RequestID,
+				}
+				if err := conn.WriteMessage(websocket.TextMessage, mustMarshal(resp)); err != nil {
+					return
+				}
+				}
 				}
 			})
 			defer server.Close()
@@ -248,22 +262,23 @@ var _ = Describe("Bridge Client", func() {
 
 	Describe("Event Handling", func() {
 		It("should forward unsolicited events to the event handler", func() {
-			server := helpers.MockBridgeServer(func(conn *websocket.Conn) {
-				time.Sleep(50 * time.Millisecond)
-				event := map[string]interface{}{
-					"method":  "PortValueUpdated",
-					"payload": json.RawMessage(`{"portId":"port-1","value":42}`),
-				}
-				data, _ := json.Marshal(event)
-				conn.WriteMessage(websocket.TextMessage, data)
+		server := helpers.MockBridgeServer(func(conn *websocket.Conn) {
+			time.Sleep(50 * time.Millisecond)
+		event := map[string]interface{}{
+			"method":  "PortValueUpdated",
+			"payload": json.RawMessage(`{"portId":"port-1","value":42}`),
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, mustMarshal(event)); err != nil {
+			return
+		}
 
-				for {
-					_, _, err := conn.ReadMessage()
-					if err != nil {
-						return
-					}
+			for {
+				_, _, err := conn.ReadMessage()
+				if err != nil {
+					return
 				}
-			})
+			}
+		})
 			defer server.Close()
 
 			c := bridge.NewClient()
@@ -290,16 +305,18 @@ var _ = Describe("Bridge Client", func() {
 		})
 
 		It("should skip heartbeat messages", func() {
-			server := helpers.MockBridgeServer(func(conn *websocket.Conn) {
-				hb := map[string]interface{}{"method": "Heartbeat", "payload": json.RawMessage(`{}`)}
-				data, _ := json.Marshal(hb)
-				conn.WriteMessage(websocket.TextMessage, data)
+		server := helpers.MockBridgeServer(func(conn *websocket.Conn) {
+		hb := map[string]interface{}{"method": "Heartbeat", "payload": json.RawMessage(`{}`)}
+		if err := conn.WriteMessage(websocket.TextMessage, mustMarshal(hb)); err != nil {
+			return
+		}
 
-				time.Sleep(20 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 
-				ev := map[string]interface{}{"method": "StatusChanged", "payload": json.RawMessage(`{"status":"idle"}`)}
-				data, _ = json.Marshal(ev)
-				conn.WriteMessage(websocket.TextMessage, data)
+		ev := map[string]interface{}{"method": "StatusChanged", "payload": json.RawMessage(`{"status":"idle"}`)}
+		if err := conn.WriteMessage(websocket.TextMessage, mustMarshal(ev)); err != nil {
+			return
+		}
 
 				for {
 					_, _, err := conn.ReadMessage()

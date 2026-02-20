@@ -26,10 +26,16 @@ var version = "0.2.0"
 func main() {
 	logFile, err := logging.SetupFileLogging()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Failed to setup file logging: %v\n", err)
+		// Startup warning to stderr — error intentionally ignored (non-fatal).
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: Failed to setup file logging: %v\n", err)
 	}
 	if logFile != nil {
-		defer logFile.Close()
+		defer func() {
+			if err := logFile.Close(); err != nil {
+				// Log file close at shutdown — best effort, stderr fallback.
+				_, _ = fmt.Fprintf(os.Stderr, "Warning: Failed to close log file: %v\n", err)
+			}
+		}()
 	}
 
 	defer logging.RecoverWithDialog()
@@ -120,7 +126,9 @@ func runAgent(cfg *config.Config) {
 				log.Error().Err(err).Str("path", msg.Path).Msg("Failed to add watch path")
 			} else {
 				log.Info().Str("path", msg.Path).Msg("Watch path added")
-				localServer.SendWatchStarted(msg.Path)
+				if err := localServer.SendWatchStarted(msg.Path); err != nil {
+					log.Warn().Err(err).Str("path", msg.Path).Msg("Failed to send watch-started notification")
+				}
 			}
 		case server.TypeUnwatch:
 			log.Info().Str("path", msg.Path).Msg("Removing watch path")
@@ -170,9 +178,13 @@ func runAgent(cfg *config.Config) {
 
 	cleanup := func() {
 		log.Info().Msg("Shutting down...")
-		bridgeClient.Disconnect()
+		if err := bridgeClient.Disconnect(); err != nil {
+			log.Warn().Err(err).Msg("Error disconnecting bridge client")
+		}
 		localServer.Stop()
-		fileWatcher.Stop()
+		if err := fileWatcher.Stop(); err != nil {
+			log.Warn().Err(err).Msg("Error stopping file watcher")
+		}
 		log.Info().Msg("Agent stopped")
 	}
 
@@ -241,5 +253,7 @@ func handleFileDialog(localServer *server.LocalServer, fileWatcher *watcher.Watc
 		log.Info().Str("path", fileInfo.Path).Msg("Auto-watching selected file")
 	}
 
-	localServer.SendFileSelected(fileInfo.Path, fileInfo.Name, fileInfo.Size, msg.RequestID)
+	if err := localServer.SendFileSelected(fileInfo.Path, fileInfo.Name, fileInfo.Size, msg.RequestID); err != nil {
+		log.Warn().Err(err).Str("path", fileInfo.Path).Msg("Failed to send file-selected event")
+	}
 }

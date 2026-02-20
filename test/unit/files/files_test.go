@@ -101,8 +101,8 @@ var _ = Describe("File Handlers", func() {
 			files.HandleExportFile(w, req)
 
 			Expect(w.Code).To(Equal(http.StatusOK))
-			var parsed map[string]interface{}
-			json.Unmarshal(w.Body.Bytes(), &parsed)
+		var parsed map[string]interface{}
+		Expect(json.Unmarshal(w.Body.Bytes(), &parsed)).To(Succeed())
 			deep := parsed["deep"].(map[string]interface{})
 			nested := deep["nested"].(map[string]interface{})
 			Expect(nested["value"]).To(BeTrue())
@@ -131,12 +131,13 @@ var _ = Describe("File Handlers", func() {
 		It("should import multipart file upload", func() {
 			jsonContent := `{"modules":[{"id":"mod-1"}]}`
 
-			var buf bytes.Buffer
-			writer := multipart.NewWriter(&buf)
-			part, err := writer.CreateFormFile("file", "test-module.json")
-			Expect(err).NotTo(HaveOccurred())
-			io.WriteString(part, jsonContent)
-			writer.Close()
+		var buf bytes.Buffer
+		writer := multipart.NewWriter(&buf)
+		part, err := writer.CreateFormFile("file", "test-module.json")
+		Expect(err).NotTo(HaveOccurred())
+		_, err = io.WriteString(part, jsonContent)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(writer.Close()).To(Succeed())
 
 			req := httptest.NewRequest(http.MethodPost, "/api/files/import", &buf)
 			req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -145,9 +146,9 @@ var _ = Describe("File Handlers", func() {
 			files.HandleImportFile(w, req)
 
 			Expect(w.Code).To(Equal(http.StatusOK))
-			var resp map[string]interface{}
-			json.Unmarshal(w.Body.Bytes(), &resp)
-			Expect(resp["fileName"]).To(Equal("test-module.json"))
+		var resp map[string]interface{}
+		Expect(json.Unmarshal(w.Body.Bytes(), &resp)).To(Succeed())
+		Expect(resp["fileName"]).To(Equal("test-module.json"))
 
 			data := resp["data"].(map[string]interface{})
 			modules := data["modules"].([]interface{})
