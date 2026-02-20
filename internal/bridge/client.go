@@ -42,6 +42,7 @@ type Client struct {
 	apiKey            string
 	isConnected       bool
 	isAuthenticated   bool
+	manualDisconnect  bool
 	mu                sync.RWMutex
 	pendingRequests   map[string]*pendingRequest
 	pendingMu         sync.Mutex
@@ -99,6 +100,7 @@ func (c *Client) Connect(url string, apiKey string) error {
 	c.mu.Lock()
 	c.ws = conn
 	c.isConnected = true
+	c.manualDisconnect = false
 	c.reconnectAttempts = 0
 	c.done = make(chan struct{})
 	c.mu.Unlock()
@@ -125,22 +127,34 @@ func (c *Client) Disconnect() error {
 
 	log.Info().Msg("Disconnecting from Adapt Bridge")
 
-	close(c.done)
+	c.manualDisconnect = true
+	c.isConnected = false
+	c.isAuthenticated = false
 
-	err := c.ws.WriteMessage(
+	// Signal readLoop to stop — close only if not already closed.
+	if c.done != nil {
+		select {
+		case <-c.done:
+			// already closed, nothing to do
+		default:
+			close(c.done)
+		}
+	}
+
+	// Grab the ws reference and release the lock before blocking network I/O.
+	ws := c.ws
+	c.ws = nil
+	c.mu.Unlock()
+
+	// Send the close handshake. This can block briefly but must not hold the lock.
+	err := ws.WriteMessage(
 		websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "User disconnected"),
 	)
 	if err != nil {
 		log.Warn().Err(err).Msg("Error sending close message")
 	}
-	c.ws.Close()
-
-	c.ws = nil
-	c.isConnected = false
-	c.isAuthenticated = false
-	c.done = nil
-	c.mu.Unlock()
+	ws.Close()
 
 	c.pendingMu.Lock()
 	for id, req := range c.pendingRequests {
@@ -264,8 +278,12 @@ func (c *Client) readLoop() {
 			handler := c.eventHandler
 			c.mu.RUnlock()
 			if handler != nil {
-				disconnectPayload, _ := json.Marshal(map[string]string{"status": "disconnected"})
-				handler("Disconnected", disconnectPayload)
+				disconnectPayload, err := json.Marshal(map[string]string{"status": "disconnected"})
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to marshal disconnect payload")
+				} else {
+					handler("Disconnected", disconnectPayload)
+				}
 			}
 
 			go c.reconnect()
@@ -323,7 +341,9 @@ func (c *Client) resolvePending(resp BridgeResponse) bool {
 				var errPayload struct {
 					Message string `json:"message"`
 				}
-				json.Unmarshal(resp.Payload, &errPayload)
+				if err := json.Unmarshal(resp.Payload, &errPayload); err != nil {
+					log.Warn().Err(err).Msg("Failed to parse bridge error payload")
+				}
 				msg := errPayload.Message
 				if msg == "" {
 					msg = "Bridge error"
@@ -342,7 +362,9 @@ func (c *Client) resolvePending(resp BridgeResponse) bool {
 			var errPayload struct {
 				Message string `json:"message"`
 			}
-			json.Unmarshal(resp.Payload, &errPayload)
+			if err := json.Unmarshal(resp.Payload, &errPayload); err != nil {
+				log.Warn().Err(err).Msg("Failed to parse bridge error payload")
+			}
 			msg := errPayload.Message
 			if msg == "" {
 				msg = "Bridge error"
@@ -387,7 +409,7 @@ func (c *Client) reconnect() {
 		time.Sleep(delay)
 
 		c.mu.RLock()
-		manualDisconnect := c.done == nil
+		manualDisconnect := c.manualDisconnect
 		alreadyConnected := c.isConnected
 		c.mu.RUnlock()
 		if manualDisconnect || alreadyConnected {
@@ -405,8 +427,12 @@ func (c *Client) reconnect() {
 		handler := c.eventHandler
 		c.mu.RUnlock()
 		if handler != nil {
-			reconnectPayload, _ := json.Marshal(map[string]string{"status": "reconnected"})
-			handler("Reconnected", reconnectPayload)
+			reconnectPayload, err := json.Marshal(map[string]string{"status": "reconnected"})
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to marshal reconnect payload")
+			} else {
+				handler("Reconnected", reconnectPayload)
+			}
 		}
 		return
 	}
