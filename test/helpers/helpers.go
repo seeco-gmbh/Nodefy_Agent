@@ -95,8 +95,7 @@ func ConcurrentEchoHandler(method string, payload string) func(conn *websocket.C
 			"requestId": msg.RequestID,
 		}
 		mu.Lock()
-		var writeErr error
-		writeErr = conn.WriteMessage(websocket.TextMessage, mustMarshal(resp))
+		writeErr := conn.WriteMessage(websocket.TextMessage, mustMarshal(resp))
 		mu.Unlock()
 		if writeErr != nil {
 			return
