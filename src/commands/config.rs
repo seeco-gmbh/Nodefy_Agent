@@ -1,7 +1,7 @@
 use tauri::State;
 use tracing::info;
 
-use crate::config::{AgentConfig, save_config};
+use crate::config::{save_config, AgentConfig};
 use crate::state::AgentState;
 
 #[tauri::command]

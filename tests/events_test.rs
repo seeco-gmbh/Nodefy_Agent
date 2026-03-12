@@ -1,6 +1,6 @@
 use nodefy_agent_lib::events::{
-    AgentStatus, BridgeEvent, BridgeStatus, DialogResult, FileContent, FileEvent,
-    ImportResult, SaveResult,
+    AgentStatus, BridgeEvent, BridgeStatus, DialogResult, FileContent, FileEvent, ImportResult,
+    SaveResult,
 };
 
 #[test]

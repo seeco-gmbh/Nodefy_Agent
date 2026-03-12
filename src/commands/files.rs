@@ -11,7 +11,8 @@ use crate::events::{DialogResult, FileContent, ImportResult, SaveResult};
 pub async fn read_file(path: String) -> Result<FileContent, String> {
     tokio::task::spawn_blocking(move || {
         let abs_path = std::fs::canonicalize(&path).unwrap_or_else(|_| PathBuf::from(&path));
-        let metadata = std::fs::metadata(&abs_path).map_err(|e| format!("File not found: {}", e))?;
+        let metadata =
+            std::fs::metadata(&abs_path).map_err(|e| format!("File not found: {}", e))?;
         let content = read_with_retry(&abs_path, 5).map_err(|e| e.to_string())?;
         let encoded = BASE64.encode(&content);
         let name = abs_path
@@ -44,7 +45,10 @@ pub async fn open_file_dialog(
     let mut builder = app.dialog().file().set_title(&title_str);
 
     if let Some(ref exts) = filters {
-        let clean: Vec<String> = exts.iter().map(|s| s.trim_start_matches('.').to_string()).collect();
+        let clean: Vec<String> = exts
+            .iter()
+            .map(|s| s.trim_start_matches('.').to_string())
+            .collect();
         let refs: Vec<&str> = clean.iter().map(|s| s.as_str()).collect();
         if !refs.is_empty() {
             builder = builder.add_filter("Files", &refs);
@@ -72,7 +76,11 @@ pub async fn open_file_dialog(
                 let metadata = std::fs::metadata(&p).map_err(|e| e.to_string())?;
                 let bytes = read_with_retry(&p, 5).map_err(|e| e.to_string())?;
                 let content = BASE64.encode(&bytes);
-                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                let name = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
 
                 info!("File selected: {} ({} bytes)", path_str, metadata.len());
                 Ok::<DialogResult, String>(DialogResult {
@@ -106,7 +114,10 @@ pub async fn save_dialog(
         .set_file_name(&default_name);
 
     let exts = filters.unwrap_or_else(|| vec!["ndf".into(), "json".into()]);
-    let clean: Vec<String> = exts.iter().map(|s| s.trim_start_matches('.').to_string()).collect();
+    let clean: Vec<String> = exts
+        .iter()
+        .map(|s| s.trim_start_matches('.').to_string())
+        .collect();
     let refs: Vec<&str> = clean.iter().map(|s| s.as_str()).collect();
     if !refs.is_empty() {
         builder = builder.add_filter("Files", &refs);
@@ -157,7 +168,9 @@ pub async fn save_file(
         None => {
             // Open save dialog inline
             let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
-            let dn = default_name.clone().unwrap_or_else(|| "project.ndf".to_string());
+            let dn = default_name
+                .clone()
+                .unwrap_or_else(|| "project.ndf".to_string());
 
             app.dialog()
                 .file()
@@ -169,7 +182,13 @@ pub async fn save_file(
                 });
 
             match rx.await.map_err(|e| e.to_string())? {
-                None => return Ok(SaveResult { cancelled: true, path: None, bytes: None }),
+                None => {
+                    return Ok(SaveResult {
+                        cancelled: true,
+                        path: None,
+                        bytes: None,
+                    })
+                }
                 Some(p) => p,
             }
         }
@@ -222,7 +241,10 @@ pub async fn load_dialog(
         .add_filter("Nodefy Files", &["ndf", "json"]);
 
     if let Some(ref exts) = filters {
-        let clean: Vec<String> = exts.iter().map(|s| s.trim_start_matches('.').to_string()).collect();
+        let clean: Vec<String> = exts
+            .iter()
+            .map(|s| s.trim_start_matches('.').to_string())
+            .collect();
         let refs: Vec<&str> = clean.iter().map(|s| s.as_str()).collect();
         if !refs.is_empty() {
             builder = builder.add_filter("Custom", &refs);
@@ -297,7 +319,10 @@ pub async fn import_file(app: AppHandle) -> Result<ImportResult, String> {
                 let data: serde_json::Value = serde_json::from_str(&content)
                     .map_err(|e| format!("File is not valid JSON: {}", e))?;
 
-                Ok::<ImportResult, String>(ImportResult { data, file_name: name })
+                Ok::<ImportResult, String>(ImportResult {
+                    data,
+                    file_name: name,
+                })
             })
             .await
             .map_err(|e| e.to_string())?
@@ -312,7 +337,13 @@ fn read_with_retry(path: &Path, max_retries: u32) -> anyhow::Result<Vec<u8>> {
             Ok(bytes) => return Ok(bytes),
             Err(e) => {
                 let delay = std::time::Duration::from_millis(100 * (i as u64 + 1));
-                warn!("File locked ({}) retry {}/{} in {:?}", e, i + 1, max_retries, delay);
+                warn!(
+                    "File locked ({}) retry {}/{} in {:?}",
+                    e,
+                    i + 1,
+                    max_retries,
+                    delay
+                );
                 std::thread::sleep(delay);
                 last_err = Some(e);
             }
@@ -323,7 +354,11 @@ fn read_with_retry(path: &Path, max_retries: u32) -> anyhow::Result<Vec<u8>> {
 
 fn ensure_extension(path: &str, valid_exts: &[&str], default_ext: &str) -> String {
     let p = PathBuf::from(path);
-    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     if valid_exts.iter().any(|v| *v == ext) {
         path.to_string()
     } else {

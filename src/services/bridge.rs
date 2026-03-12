@@ -2,11 +2,7 @@ use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tauri::{AppHandle, Emitter};
 use tokio::{
     sync::{mpsc, oneshot, Mutex, Notify, RwLock},
@@ -47,6 +43,9 @@ enum BridgeCommand {
     Disconnect,
 }
 
+type PendingRequestMap =
+    Arc<Mutex<HashMap<String, (Option<String>, oneshot::Sender<Result<Value>>)>>>;
+
 #[derive(Debug, Clone, Default)]
 pub struct BridgeConnectionState {
     pub connected: bool,
@@ -60,6 +59,12 @@ pub struct BridgeClient {
     connected_notify: Arc<Notify>,
 }
 
+impl Default for BridgeClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BridgeClient {
     pub fn new() -> Self {
         Self {
@@ -69,7 +74,12 @@ impl BridgeClient {
         }
     }
 
-    pub async fn connect(&self, app: AppHandle, url: String, api_key: Option<String>) -> Result<()> {
+    pub async fn connect(
+        &self,
+        app: AppHandle,
+        url: String,
+        api_key: Option<String>,
+    ) -> Result<()> {
         {
             let state = self.state.read().await;
             if state.connected {
@@ -136,7 +146,8 @@ impl BridgeClient {
     ) -> Result<Value> {
         let tx = {
             let lock = self.tx.lock().await;
-            lock.clone().ok_or_else(|| anyhow!("Not connected to Adapt Bridge"))?
+            lock.clone()
+                .ok_or_else(|| anyhow!("Not connected to Adapt Bridge"))?
         };
 
         let request_id = Uuid::new_v4().to_string();
@@ -166,7 +177,8 @@ impl BridgeClient {
     pub async fn send(&self, msg_type: &str, payload: Value) -> Result<()> {
         let tx = {
             let lock = self.tx.lock().await;
-            lock.clone().ok_or_else(|| anyhow!("Not connected to Adapt Bridge"))?
+            lock.clone()
+                .ok_or_else(|| anyhow!("Not connected to Adapt Bridge"))?
         };
 
         let msg = BridgeMessage {
@@ -175,9 +187,13 @@ impl BridgeClient {
             request_id: None,
         };
 
-        tx.send(BridgeCommand::Send { msg, reply: None, expected_method: None })
-            .await
-            .map_err(|_| anyhow!("Bridge channel closed"))?;
+        tx.send(BridgeCommand::Send {
+            msg,
+            reply: None,
+            expected_method: None,
+        })
+        .await
+        .map_err(|_| anyhow!("Bridge channel closed"))?;
 
         Ok(())
     }
@@ -194,7 +210,10 @@ async fn bridge_loop(
     for attempt in 0..=MAX_RECONNECT_ATTEMPTS {
         if attempt > 0 {
             let delay = Duration::from_secs(2u64.pow(attempt - 1).min(16));
-            info!("Reconnecting to bridge in {:?} (attempt {}/{})", delay, attempt, MAX_RECONNECT_ATTEMPTS);
+            info!(
+                "Reconnecting to bridge in {:?} (attempt {}/{})",
+                delay, attempt, MAX_RECONNECT_ATTEMPTS
+            );
             sleep(delay).await;
         }
 
@@ -226,8 +245,7 @@ async fn bridge_loop(
                 }
 
                 // Pending request map: request_id -> (expected_method, reply_sender)
-                let pending: Arc<Mutex<HashMap<String, (Option<String>, oneshot::Sender<Result<Value>>)>>> =
-                    Arc::new(Mutex::new(HashMap::new()));
+                let pending: PendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
 
                 let pending_clone = pending.clone();
                 let app_clone = app.clone();
@@ -255,7 +273,9 @@ async fn bridge_loop(
                                         let resolved = if let Some(ref rid) = resp.request_id {
                                             if let Some((_, reply)) = pending.remove(rid) {
                                                 if resp.method == "Error" {
-                                                    let msg = resp.payload.get("message")
+                                                    let msg = resp
+                                                        .payload
+                                                        .get("message")
                                                         .and_then(|m| m.as_str())
                                                         .unwrap_or("Bridge error")
                                                         .to_string();
@@ -269,9 +289,11 @@ async fn bridge_loop(
                                             }
                                         } else {
                                             // No request ID - try to match by expected method
-                                            let key = pending.keys()
+                                            let key = pending
+                                                .keys()
                                                 .find(|k| {
-                                                    pending.get(*k)
+                                                    pending
+                                                        .get(*k)
                                                         .and_then(|(em, _)| em.as_deref())
                                                         .map(|em| em == resp.method)
                                                         .unwrap_or(false)
@@ -296,13 +318,19 @@ async fn bridge_loop(
                                                 method: resp.method,
                                                 payload: resp.payload,
                                             };
-                                            if let Err(e) = app_clone.emit(BRIDGE_EVENT_NAME, &event) {
+                                            if let Err(e) =
+                                                app_clone.emit(BRIDGE_EVENT_NAME, &event)
+                                            {
                                                 error!("Failed to emit bridge event: {}", e);
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        debug!("Failed to parse bridge message: {} - text: {}", e, &text[..text.len().min(200)]);
+                                        debug!(
+                                            "Failed to parse bridge message: {} - text: {}",
+                                            e,
+                                            &text[..text.len().min(200)]
+                                        );
                                     }
                                 }
                             }
@@ -326,29 +354,31 @@ async fn bridge_loop(
                             let _ = ws_tx.send(WsMessage::Close(None)).await;
                             break;
                         }
-                        BridgeCommand::Send { msg, reply, expected_method } => {
-                            match serde_json::to_string(&msg) {
-                                Ok(text) => {
-                                    if let Err(e) = ws_tx.send(WsMessage::Text(text.into())).await {
-                                        error!("Failed to send to bridge: {}", e);
-                                        if let Some(reply) = reply {
-                                            let _ = reply.send(Err(anyhow!("Send failed: {}", e)));
-                                        }
-                                        break;
-                                    }
-                                    if let (Some(reply), Some(rid)) = (reply, msg.request_id) {
-                                        let mut pending = pending.lock().await;
-                                        pending.insert(rid, (expected_method, reply));
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Failed to serialize message: {}", e);
+                        BridgeCommand::Send {
+                            msg,
+                            reply,
+                            expected_method,
+                        } => match serde_json::to_string(&msg) {
+                            Ok(text) => {
+                                if let Err(e) = ws_tx.send(WsMessage::Text(text.into())).await {
+                                    error!("Failed to send to bridge: {}", e);
                                     if let Some(reply) = reply {
-                                        let _ = reply.send(Err(anyhow!("Serialize failed: {}", e)));
+                                        let _ = reply.send(Err(anyhow!("Send failed: {}", e)));
                                     }
+                                    break;
+                                }
+                                if let (Some(reply), Some(rid)) = (reply, msg.request_id) {
+                                    let mut pending = pending.lock().await;
+                                    pending.insert(rid, (expected_method, reply));
                                 }
                             }
-                        }
+                            Err(e) => {
+                                error!("Failed to serialize message: {}", e);
+                                if let Some(reply) = reply {
+                                    let _ = reply.send(Err(anyhow!("Serialize failed: {}", e)));
+                                }
+                            }
+                        },
                     }
                 }
 
@@ -363,7 +393,11 @@ async fn bridge_loop(
                 warn!("Bridge connection lost, will retry...");
             }
             Err(e) => {
-                warn!("Failed to connect to bridge (attempt {}): {}", attempt + 1, e);
+                warn!(
+                    "Failed to connect to bridge (attempt {}): {}",
+                    attempt + 1,
+                    e
+                );
             }
         }
     }

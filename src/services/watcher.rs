@@ -195,12 +195,7 @@ fn read_file_with_retry(path: &str) -> Option<String> {
             Ok(bytes) => return Some(BASE64.encode(&bytes)),
             Err(e) => {
                 let delay = std::time::Duration::from_millis(100 * (attempt as u64 + 1));
-                debug!(
-                    "File locked ({}) retry {}/5 in {:?}",
-                    e,
-                    attempt + 1,
-                    delay
-                );
+                debug!("File locked ({}) retry {}/5 in {:?}", e, attempt + 1, delay);
                 std::thread::sleep(delay);
             }
         }

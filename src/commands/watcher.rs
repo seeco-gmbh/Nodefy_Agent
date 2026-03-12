@@ -18,10 +18,7 @@ pub async fn watch_path(
 }
 
 #[tauri::command]
-pub async fn unwatch_path(
-    state: State<'_, AgentState>,
-    path: String,
-) -> Result<(), String> {
+pub async fn unwatch_path(state: State<'_, AgentState>, path: String) -> Result<(), String> {
     info!("Unwatch path requested: {}", path);
 
     let mut watcher = state.watcher.lock().await;

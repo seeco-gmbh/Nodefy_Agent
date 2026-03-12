@@ -1,10 +1,13 @@
-use nodefy_agent_lib::config::{AgentConfig, save_config};
+use nodefy_agent_lib::config::{save_config, AgentConfig};
 use tempfile::TempDir;
 
 #[test]
 fn test_default_config() {
     let config = AgentConfig::default();
-    assert_eq!(config.file_types, vec![".csv", ".xlsx", ".xls", ".json", ".xml", ".parquet"]);
+    assert_eq!(
+        config.file_types,
+        vec![".csv", ".xlsx", ".xls", ".json", ".xml", ".parquet"]
+    );
     assert!(config.recursive);
     assert!(!config.debug);
     assert!(config.bridge_url.is_empty());
@@ -50,9 +53,8 @@ fn test_save_and_load_config() {
     std::fs::write(&config_path, content).unwrap();
 
     // Load back
-    let loaded: AgentConfig = serde_json::from_str(
-        &std::fs::read_to_string(&config_path).unwrap()
-    ).unwrap();
+    let loaded: AgentConfig =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
 
     assert_eq!(loaded.file_types, config.file_types);
     assert_eq!(loaded.bridge_url, config.bridge_url);

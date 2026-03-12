@@ -60,7 +60,11 @@ pub async fn bridge_send(
 
     let expected = expected_method.unwrap_or_default();
     if expected.is_empty() {
-        state.bridge.send(&action, payload).await.map_err(|e| e.to_string())?;
+        state
+            .bridge
+            .send(&action, payload)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(Value::Null)
     } else {
         state
@@ -81,7 +85,10 @@ pub async fn bridge_create_component(
 ) -> Result<Value, String> {
     let mut data = payload.unwrap_or_else(|| Value::Object(Default::default()));
     if let Some(obj) = data.as_object_mut() {
-        obj.insert("componentType".to_string(), Value::String(component_type.clone()));
+        obj.insert(
+            "componentType".to_string(),
+            Value::String(component_type.clone()),
+        );
     }
     state
         .bridge
@@ -115,7 +122,12 @@ pub async fn bridge_delete_component(
     let payload = serde_json::json!({ "componentId": component_id });
     state
         .bridge
-        .send_and_wait("DeleteComponent", payload, "Deleted", Duration::from_secs(5))
+        .send_and_wait(
+            "DeleteComponent",
+            payload,
+            "Deleted",
+            Duration::from_secs(5),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -141,7 +153,12 @@ pub async fn bridge_get_component_info(
 
     state
         .bridge
-        .send_and_wait("GetComponentInfo", payload, expected, Duration::from_secs(5))
+        .send_and_wait(
+            "GetComponentInfo",
+            payload,
+            expected,
+            Duration::from_secs(5),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -163,7 +180,12 @@ pub async fn bridge_execute(
 
     state
         .bridge
-        .send_and_wait("Execute", data, "ExecutionCompleted", Duration::from_secs(30))
+        .send_and_wait(
+            "Execute",
+            data,
+            "ExecutionCompleted",
+            Duration::from_secs(30),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -176,7 +198,12 @@ pub async fn bridge_warmup(
     let payload = serde_json::json!({ "networkId": network_id });
     state
         .bridge
-        .send_and_wait("WarmUp", payload, "ExecutionCompleted", Duration::from_secs(30))
+        .send_and_wait(
+            "WarmUp",
+            payload,
+            "ExecutionCompleted",
+            Duration::from_secs(30),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -205,7 +232,12 @@ pub async fn bridge_add_port(
     }
     state
         .bridge
-        .send_and_wait("AddPortToComponent", data, "Created", Duration::from_secs(10))
+        .send_and_wait(
+            "AddPortToComponent",
+            data,
+            "Created",
+            Duration::from_secs(10),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -219,7 +251,12 @@ pub async fn bridge_delete_port(
     let payload = serde_json::json!({ "componentId": component_id, "portId": port_id });
     state
         .bridge
-        .send_and_wait("DeletePortFromComponent", payload, "Deleted", Duration::from_secs(5))
+        .send_and_wait(
+            "DeletePortFromComponent",
+            payload,
+            "Deleted",
+            Duration::from_secs(5),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -248,11 +285,20 @@ pub async fn bridge_get_connection_info(
     mode: Option<String>,
 ) -> Result<Value, String> {
     let mode = mode.unwrap_or_else(|| "connections".to_string());
-    let expected = if mode == "available-ports" { "AvailablePorts" } else { "Connections" };
+    let expected = if mode == "available-ports" {
+        "AvailablePorts"
+    } else {
+        "Connections"
+    };
     let payload = serde_json::json!({ "containerId": container_id, "mode": mode });
     state
         .bridge
-        .send_and_wait("GetConnectionInfo", payload, expected, Duration::from_secs(5))
+        .send_and_wait(
+            "GetConnectionInfo",
+            payload,
+            expected,
+            Duration::from_secs(5),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -269,7 +315,12 @@ pub async fn bridge_export_component(
     });
     state
         .bridge
-        .send_and_wait("ExportComponent", payload, "Exported", Duration::from_secs(5))
+        .send_and_wait(
+            "ExportComponent",
+            payload,
+            "Exported",
+            Duration::from_secs(5),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -309,13 +360,21 @@ pub async fn bridge_get_template_types(
     template_type: Option<String>,
 ) -> Result<Value, String> {
     let (payload, expected) = if let Some(t) = template_type {
-        (serde_json::json!({ "templateType": t }), "TemplateTypeDetails")
+        (
+            serde_json::json!({ "templateType": t }),
+            "TemplateTypeDetails",
+        )
     } else {
         (serde_json::json!({}), "TemplateTypes")
     };
     state
         .bridge
-        .send_and_wait("GetTemplateTypes", payload, expected, Duration::from_secs(10))
+        .send_and_wait(
+            "GetTemplateTypes",
+            payload,
+            expected,
+            Duration::from_secs(10),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -329,7 +388,12 @@ pub async fn bridge_add_component_to_container(
     let payload = serde_json::json!({ "containerId": container_id, "childId": child_id });
     state
         .bridge
-        .send_and_wait("AddComponentToContainer", payload, "Created", Duration::from_secs(5))
+        .send_and_wait(
+            "AddComponentToContainer",
+            payload,
+            "Created",
+            Duration::from_secs(5),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -338,7 +402,12 @@ pub async fn bridge_add_component_to_container(
 pub async fn bridge_sync(state: State<'_, AgentState>) -> Result<Value, String> {
     state
         .bridge
-        .send_and_wait("GetBridgeStatus", Value::Object(Default::default()), "BridgeStatus", Duration::from_secs(5))
+        .send_and_wait(
+            "GetBridgeStatus",
+            Value::Object(Default::default()),
+            "BridgeStatus",
+            Duration::from_secs(5),
+        )
         .await
         .map_err(|e| e.to_string())
 }
