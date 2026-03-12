@@ -1,6 +1,4 @@
-use nodefy_agent_lib::events::{
-    AgentStatus, BridgeStatus, DialogResult, FileEvent, SaveResult,
-};
+use nodefy_agent_lib::events::{AgentStatus, BridgeStatus, DialogResult, FileEvent, SaveResult};
 
 #[test]
 fn test_file_event_serialization() {
