@@ -1,4 +1,3 @@
-use std::time::Duration;
 use tempfile::TempDir;
 
 /// Integration test for the file watcher using temp directory.

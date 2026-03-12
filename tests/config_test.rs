@@ -1,4 +1,4 @@
-use nodefy_agent_lib::config::{save_config, AgentConfig};
+use nodefy_agent_lib::config::AgentConfig;
 use tempfile::TempDir;
 
 #[test]
